@@ -1,33 +1,39 @@
 use serde::{Deserialize, Serialize};
 
-use crate::types::ImuError;
+use crate::error::ImuError;
+use crate::types::BusId;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct BusId(pub u8);
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+/// Address of one IMU target on a bus.
 pub struct ImuTargetId {
+    /// Bus that carries this target.
     pub bus_id: BusId,
+    /// Board-defined target slot on that bus, such as a chip-select index.
     pub target_index: u8,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum BusMode {
+/// SPI clock mode used when talking to a target.
+pub enum SpiMode {
+    /// CPOL = 0, CPHA = 0.
     Mode0,
+    /// CPOL = 0, CPHA = 1.
     Mode1,
+    /// CPOL = 1, CPHA = 0.
     Mode2,
+    /// CPOL = 1, CPHA = 1.
     Mode3,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct BusProfile {
+pub struct SpiProfile {
     pub id: u8,
-    pub mode: BusMode,
+    pub mode: SpiMode,
     pub frequency_khz: u32,
 }
 
-impl BusProfile {
-    pub const fn new(id: u8, mode: BusMode, frequency_khz: u32) -> Self {
+impl SpiProfile {
+    pub const fn new(id: u8, mode: SpiMode, frequency_khz: u32) -> Self {
         Self {
             id,
             mode,
@@ -37,17 +43,13 @@ impl BusProfile {
 }
 
 pub trait ImuBus {
+    type Profile;
     fn apply_profile(
         &mut self,
         target: ImuTargetId,
-        profile: BusProfile,
+        profile: Self::Profile,
     ) -> Result<(), ImuError>;
-    fn write_regs(
-        &mut self,
-        target: ImuTargetId,
-        reg: u8,
-        data: &[u8],
-    ) -> Result<(), ImuError>;
+    fn write_regs(&mut self, target: ImuTargetId, reg: u8, data: &[u8]) -> Result<(), ImuError>;
     fn read_regs(
         &mut self,
         target: ImuTargetId,

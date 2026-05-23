@@ -1,6 +1,9 @@
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    let port_name = args.get(1).cloned().unwrap_or_else(|| String::from("COM15"));
+    let port_name = args
+        .get(1)
+        .cloned()
+        .unwrap_or_else(|| String::from("COM15"));
     let baud_rate = args
         .get(2)
         .and_then(|value| value.parse::<u32>().ok())

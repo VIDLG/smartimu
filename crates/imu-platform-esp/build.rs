@@ -6,9 +6,16 @@ fn generate_bmi270_config() {
     use std::fs;
     use std::path::PathBuf;
 
-    let manifest_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("missing manifest dir"));
-    let workspace_dir = manifest_dir.parent().and_then(|p| p.parent()).expect("workspace root");
-    let source_path = workspace_dir.join("contrib").join("bmi270").join("bmi270_upstream.c");
+    let manifest_dir =
+        PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("missing manifest dir"));
+    let workspace_dir = manifest_dir
+        .parent()
+        .and_then(|p| p.parent())
+        .expect("workspace root");
+    let source_path = workspace_dir
+        .join("contrib")
+        .join("bmi270")
+        .join("bmi270_upstream.c");
 
     println!("cargo:rerun-if-changed={}", source_path.display());
 

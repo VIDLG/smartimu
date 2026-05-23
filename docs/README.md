@@ -17,8 +17,8 @@
   - 当前主链路测试步骤、实机结论与验收标准
 - [fusion-integration-plan.md](d:\Programs\rust\PCB_test\docs\fusion-integration-plan.md)
   - 引入 Fusion 库、四元数协议与 GUI 模式切换的专项计划
-- [gpui-viewer-plan.md](d:\Programs\rust\PCB_test\docs\gpui-viewer-plan.md)
-  - 新增 `imu-viewer-gpui` 以验证更高性能 3D 视图的专项计划
+- [wgpu-viewer-plan.md](d:\Programs\rust\PCB_test\docs\wgpu-viewer-plan.md)
+  - 新增 `imu-viewer-wgpu` 以验证更高性能 3D 视图的专项计划
 
 ## 历史与诊断
 

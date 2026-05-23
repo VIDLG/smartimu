@@ -1,8 +1,9 @@
-use heapless::{String, Vec};
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
 use imu_core::{
-    BusDescriptor, ErrorFrame, HeartbeatFrame, HelloFrame, ImuDescriptor, ImuError, ImuId,
-    ImuKind, ProbeResultFrame, PROTOCOL_VERSION, RawSample, SampleFrame, TopologyFrame,
-    WireFormat, WireFrame, WireHeader, MAX_MESSAGE_LEN,
+    BusDescriptor, ErrorFrame, HeartbeatFrame, HelloFrame, ImuChip, ImuDescriptor, ImuError, ImuId,
+    MAX_MESSAGE_LEN, PROTOCOL_VERSION, ProbeResultFrame, RawSample, SampleFrame, TopologyFrame,
+    WireFormat, WireFrame, WireHeader,
 };
 
 pub struct SessionRuntime {
@@ -38,30 +39,20 @@ impl SessionRuntime {
     pub fn hello(&mut self, uptime_ms: u32, system_label: &str) -> WireFrame {
         WireFrame::Hello(HelloFrame {
             header: self.header(uptime_ms),
-            system_label: heapless_string::<32>(system_label),
+            system_label: bounded_string(system_label, imu_core::MAX_LABEL_LEN),
         })
     }
 
-    pub fn topology<const B: usize, const I: usize>(
+    pub fn topology(
         &mut self,
         uptime_ms: u32,
-        buses: Vec<BusDescriptor, B>,
-        imus: Vec<ImuDescriptor, I>,
+        buses: Vec<BusDescriptor>,
+        imus: Vec<ImuDescriptor>,
     ) -> WireFrame {
-        let mut bus_vec = Vec::new();
-        for bus in buses {
-            let _ = bus_vec.push(bus);
-        }
-
-        let mut imu_vec = Vec::new();
-        for imu in imus {
-            let _ = imu_vec.push(imu);
-        }
-
         WireFrame::Topology(TopologyFrame {
             header: self.header(uptime_ms),
-            buses: bus_vec,
-            imus: imu_vec,
+            buses,
+            imus,
         })
     }
 
@@ -70,16 +61,16 @@ impl SessionRuntime {
         uptime_ms: u32,
         imu_id: ImuId,
         driver_name: &str,
-        detected_kind: ImuKind,
+        detected_chip: ImuChip,
         success: bool,
         error: Option<ImuError>,
-        profile: Option<imu_core::BusProfile>,
+        profile: Option<imu_core::SpiProfile>,
     ) -> WireFrame {
         WireFrame::ProbeResult(ProbeResultFrame {
             header: self.header(uptime_ms),
             imu_id,
-            driver_name: heapless_string::<32>(driver_name),
-            detected_kind,
+            driver_name: bounded_string(driver_name, imu_core::MAX_LABEL_LEN),
+            detected_chip,
             success,
             error,
             profile,
@@ -90,7 +81,7 @@ impl SessionRuntime {
         &mut self,
         uptime_ms: u32,
         imu_id: ImuId,
-        imu_kind: ImuKind,
+        imu_chip: ImuChip,
         sample_index: u32,
         timestamp_us: u64,
         sample: RawSample,
@@ -99,7 +90,7 @@ impl SessionRuntime {
         WireFrame::Sample(SampleFrame {
             header: self.header(uptime_ms),
             imu_id,
-            imu_kind,
+            imu_chip,
             sample_index,
             timestamp_us,
             sample,
@@ -118,7 +109,7 @@ impl SessionRuntime {
             header: self.header(uptime_ms),
             imu_id,
             error,
-            message: heapless_string::<MAX_MESSAGE_LEN>(message),
+            message: bounded_string(message, MAX_MESSAGE_LEN),
         })
     }
 
@@ -130,12 +121,10 @@ impl SessionRuntime {
     }
 }
 
-pub fn heapless_string<const N: usize>(value: &str) -> String<N> {
-    let mut output = String::new();
-    for ch in value.chars() {
-        if output.push(ch).is_err() {
-            break;
-        }
-    }
-    output
+pub fn bounded_string(value: &str, max_chars: usize) -> String {
+    value.chars().take(max_chars).collect()
+}
+
+pub fn protocol_string(value: &str) -> String {
+    value.to_string()
 }

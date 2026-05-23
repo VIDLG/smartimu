@@ -1,7 +1,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::fs;
-use std::io::{BufRead, BufReader};
 use std::io::Read;
+use std::io::{BufRead, BufReader};
 use std::process::Child;
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
@@ -10,7 +10,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use eframe::egui;
 use egui_plot::{Legend, Line, Plot, PlotPoints};
 use imu_core::{
-    decode_binary_packet, decode_json, default_scale_profile_for_kind, ImuCapabilities, ImuDescriptor, ImuId, ImuLocation, OrientationFrame, SampleFrame, ViewMode, WireFrame,
+    ImuDescriptor, ImuId, OrientationFrame, SampleFrame, WireFrame, decode_binary_packet,
+    decode_json, default_scale_profile_for_chip,
 };
 
 enum ViewerEvent {
@@ -32,6 +33,12 @@ enum InputMode {
     Auto,
     Json,
     Binary,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ViewMode {
+    Raw6Axis,
+    Quaternion,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -132,7 +139,11 @@ impl eframe::App for ViewerApp {
                         }
                     });
 
-                ui.add(egui::DragValue::new(&mut self.baud_rate).speed(100.0).prefix("baud "));
+                ui.add(
+                    egui::DragValue::new(&mut self.baud_rate)
+                        .speed(100.0)
+                        .prefix("baud "),
+                );
 
                 egui::ComboBox::from_label("mode")
                     .selected_text(match self.input_mode {
@@ -153,7 +164,11 @@ impl eframe::App for ViewerApp {
                     })
                     .show_ui(ui, |ui| {
                         ui.selectable_value(&mut self.view_mode, ViewMode::Raw6Axis, "raw 6-axis");
-                        ui.selectable_value(&mut self.view_mode, ViewMode::Quaternion, "quaternion");
+                        ui.selectable_value(
+                            &mut self.view_mode,
+                            ViewMode::Quaternion,
+                            "quaternion",
+                        );
                     });
 
                 if ui.button("connect").clicked() {
@@ -163,7 +178,11 @@ impl eframe::App for ViewerApp {
                     self.disconnect();
                 }
 
-                let record_label = if self.recording { "stop recording" } else { "start recording" };
+                let record_label = if self.recording {
+                    "stop recording"
+                } else {
+                    "start recording"
+                };
                 if ui.button(record_label).clicked() {
                     self.toggle_recording();
                 }
@@ -182,7 +201,11 @@ impl eframe::App for ViewerApp {
                 if ui.button("load replay").clicked() {
                     self.load_replay();
                 }
-                let replay_label = if self.replaying { "stop replay" } else { "play replay" };
+                let replay_label = if self.replaying {
+                    "stop replay"
+                } else {
+                    "play replay"
+                };
                 if ui.button(replay_label).clicked() {
                     self.toggle_replay();
                 }
@@ -202,10 +225,13 @@ impl eframe::App for ViewerApp {
                 for (imu_id, descriptor) in &self.topology {
                     let selected = self.selected_imu == Some(*imu_id);
                     ui.group(|ui| {
-                        if ui.selectable_label(selected, descriptor.label.as_str()).clicked() {
+                        if ui
+                            .selectable_label(selected, descriptor.label.as_str())
+                            .clicked()
+                        {
                             self.selected_imu = Some(*imu_id);
                         }
-                        ui.label(format!("{:?} @ {:?}", descriptor.kind, descriptor.location));
+                        ui.label(format!("{:?}", descriptor.chip));
                         ui.label(format!("imu={}/{}", imu_id.system_id, imu_id.sensor_id));
                         let collapsed = self.collapsed_imus.entry(*imu_id).or_insert(false);
                         let label = if *collapsed { "expand" } else { "collapse" };
@@ -233,7 +259,10 @@ impl eframe::App for ViewerApp {
 
                 ui.separator();
                 ui.heading("3D Preview");
-                if let Some(imu_id) = self.selected_imu.or_else(|| self.latest_samples.keys().next().copied()) {
+                if let Some(imu_id) = self
+                    .selected_imu
+                    .or_else(|| self.latest_samples.keys().next().copied())
+                {
                     match self.view_mode {
                         ViewMode::Raw6Axis => {
                             if let Some(sample) = self.latest_samples.get(&imu_id) {
@@ -264,7 +293,6 @@ impl eframe::App for ViewerApp {
                         ui.label(error);
                     }
                 }
-
             });
 
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -287,7 +315,13 @@ impl eframe::App for ViewerApp {
                         sample.sample_index,
                         sample.timestamp_us
                     ));
-                    if let Some(scale) = default_scale_profile_for_kind(sample.imu_kind) {
+                    if let Some(scale) = self
+                        .topology
+                        .get(imu_id)
+                        .and_then(|descriptor| descriptor.sample_config.as_ref())
+                        .and_then(|config| imu_core::scale_profile_for_config(sample.imu_chip, config))
+                        .or_else(|| default_scale_profile_for_chip(sample.imu_chip))
+                    {
                         let physical = sample.sample.to_physical(scale);
                         ui.label(format!(
                             "{}",
@@ -452,7 +486,9 @@ impl ViewerApp {
                     Ok(0) => {
                         idle_count = idle_count.saturating_add(1);
                         if idle_count == 20 && !saw_frame {
-                            let _ = tx.send(ViewerEvent::Status(String::from("opened port, waiting for valid frames")));
+                            let _ = tx.send(ViewerEvent::Status(String::from(
+                                "opened port, waiting for valid frames",
+                            )));
                         }
                     }
                     Ok(read) => {
@@ -463,7 +499,9 @@ impl ViewerApp {
                                     if *byte == b'\n' {
                                         if let Some(frame) = parse_json_line(&line) {
                                             saw_frame = true;
-                                            let _ = tx.send(ViewerEvent::Status(String::from("json stream")));
+                                            let _ = tx.send(ViewerEvent::Status(String::from(
+                                                "json stream",
+                                            )));
                                             if tx.send(ViewerEvent::Frame(frame)).is_err() {
                                                 return;
                                             }
@@ -478,7 +516,9 @@ impl ViewerApp {
                                         packet.push(0);
                                         if let Some(frame) = parse_binary_packet(&packet) {
                                             saw_frame = true;
-                                            let _ = tx.send(ViewerEvent::Status(String::from("binary stream")));
+                                            let _ = tx.send(ViewerEvent::Status(String::from(
+                                                "binary stream",
+                                            )));
                                             if tx.send(ViewerEvent::Frame(frame)).is_err() {
                                                 return;
                                             }
@@ -493,7 +533,9 @@ impl ViewerApp {
                                         if let Some(frame) = parse_json_line(&line) {
                                             detected = InputMode::Json;
                                             saw_frame = true;
-                                            let _ = tx.send(ViewerEvent::Status(String::from("auto -> json")));
+                                            let _ = tx.send(ViewerEvent::Status(String::from(
+                                                "auto -> json",
+                                            )));
                                             if tx.send(ViewerEvent::Frame(frame)).is_err() {
                                                 return;
                                             }
@@ -504,7 +546,9 @@ impl ViewerApp {
                                         if let Some(frame) = parse_binary_packet(&packet) {
                                             detected = InputMode::Binary;
                                             saw_frame = true;
-                                            let _ = tx.send(ViewerEvent::Status(String::from("auto -> binary")));
+                                            let _ = tx.send(ViewerEvent::Status(String::from(
+                                                "auto -> binary",
+                                            )));
                                             if tx.send(ViewerEvent::Frame(frame)).is_err() {
                                                 return;
                                             }
@@ -519,7 +563,8 @@ impl ViewerApp {
                         }
                     }
                     Err(error) => {
-                        let _ = tx.send(ViewerEvent::Status(format!("serial read error: {}", error)));
+                        let _ =
+                            tx.send(ViewerEvent::Status(format!("serial read error: {}", error)));
                         thread::sleep(Duration::from_millis(20));
                     }
                 }
@@ -536,7 +581,11 @@ impl ViewerApp {
         }
 
         loop {
-            let event = match self.receiver.as_ref().and_then(|receiver| receiver.try_recv().ok()) {
+            let event = match self
+                .receiver
+                .as_ref()
+                .and_then(|receiver| receiver.try_recv().ok())
+            {
                 Some(event) => event,
                 None => break,
             };
@@ -563,7 +612,10 @@ impl ViewerApp {
             self.recorded_frames.clear();
             self.export_status = String::from("recording started");
         } else {
-            self.export_status = format!("recording stopped with {} frames", self.recorded_frames.len());
+            self.export_status = format!(
+                "recording stopped with {} frames",
+                self.recorded_frames.len()
+            );
         }
     }
 
@@ -595,8 +647,9 @@ impl ViewerApp {
     }
 
     fn export_csv(&mut self) {
-        let mut content =
-            String::from("system_id,sensor_id,seq,sample_index,timestamp_us,ax,ay,az,gx,gy,gz,status_bits\n");
+        let mut content = String::from(
+            "system_id,sensor_id,seq,sample_index,timestamp_us,ax,ay,az,gx,gy,gz,status_bits\n",
+        );
         let mut rows = 0usize;
 
         for frame in &self.recorded_frames {
@@ -724,20 +777,24 @@ impl ViewerApp {
             WireFrame::Sample(sample) => {
                 self.last_seq = Some(sample.header.seq);
                 self.update_orientation(&sample);
-                self.topology.entry(sample.imu_id).or_insert_with(|| ImuDescriptor {
-                    id: sample.imu_id,
-                    bus_id: imu_core::BusId(0),
-                    kind: sample.imu_kind,
-                    location: ImuLocation::Index(sample.imu_id.sensor_id),
-                    label: {
-                        let mut s = heapless::String::<32>::new();
-                        let _ = core::fmt::write(&mut s, format_args!("imu-{}", sample.imu_id.sensor_id));
-                        s
-                    },
-                    capabilities: ImuCapabilities::default(),
-                });
+                self.topology
+                    .entry(sample.imu_id)
+                    .or_insert_with(|| ImuDescriptor {
+                        id: sample.imu_id,
+                        bus_id: imu_core::BusId(0),
+                        chip: sample.imu_chip,
+                        label: format!("imu-{}", sample.imu_id.sensor_id),
+                        sample_config: None,
+                        supported_sample_configs: Vec::new(),
+                    });
                 let entry = self.history.entry(sample.imu_id).or_default();
-                let values = if let Some(scale) = default_scale_profile_for_kind(sample.imu_kind) {
+                let values = if let Some(scale) = self
+                    .topology
+                    .get(&sample.imu_id)
+                    .and_then(|descriptor| descriptor.sample_config.as_ref())
+                    .and_then(|config| imu_core::scale_profile_for_config(sample.imu_chip, config))
+                    .or_else(|| default_scale_profile_for_chip(sample.imu_chip))
+                {
                     let physical = sample.sample.to_physical(scale);
                     [
                         sample.timestamp_us as f64 / 1_000_000.0,
@@ -771,7 +828,8 @@ impl ViewerApp {
             WireFrame::Error(error) => {
                 self.last_seq = Some(error.header.seq);
                 self.status = format!("device error: {:?}", error.error);
-                self.errors.push_back(format!("{:?}: {}", error.error, error.message));
+                self.errors
+                    .push_back(format!("{:?}: {}", error.error, error.message));
                 while self.errors.len() > 32 {
                     let _ = self.errors.pop_front();
                 }
@@ -794,7 +852,8 @@ impl ViewerApp {
             }
             WireFrame::Orientation(orientation) => {
                 self.last_seq = Some(orientation.header.seq);
-                self.latest_orientation.insert(orientation.imu_id, orientation.clone());
+                self.latest_orientation
+                    .insert(orientation.imu_id, orientation.clone());
                 let entry = self.quat_history.entry(orientation.imu_id).or_default();
                 entry.push_back([
                     orientation.timestamp_us as f64 / 1_000_000.0,
@@ -817,7 +876,8 @@ impl ViewerApp {
             .or_insert_with(OrientationState::default);
 
         let dt = if let Some(last_timestamp_us) = state.last_timestamp_us {
-            ((sample.timestamp_us.saturating_sub(last_timestamp_us)) as f32 / 1_000_000.0).clamp(0.0, 0.1)
+            ((sample.timestamp_us.saturating_sub(last_timestamp_us)) as f32 / 1_000_000.0)
+                .clamp(0.0, 0.1)
         } else {
             0.0
         };
@@ -914,7 +974,10 @@ fn spawn_powershell_serial_reader(
         for line in reader.lines() {
             match line {
                 Ok(line) if !line.trim().is_empty() => {
-                    let _ = tx_stderr.send(ViewerEvent::Status(format!("powershell stderr: {}", line.trim())));
+                    let _ = tx_stderr.send(ViewerEvent::Status(format!(
+                        "powershell stderr: {}",
+                        line.trim()
+                    )));
                 }
                 _ => {}
             }
@@ -932,11 +995,16 @@ fn spawn_powershell_serial_reader(
                 continue;
             }
             if trimmed == "__OPENED__" {
-                let _ = tx.send(ViewerEvent::Status(format!("opened {} via powershell", port_name)));
+                let _ = tx.send(ViewerEvent::Status(format!(
+                    "opened {} via powershell",
+                    port_name
+                )));
                 continue;
             }
             if let Ok(frame) = decode_json(trimmed) {
-                let _ = tx.send(ViewerEvent::Status(String::from("json stream (powershell)")));
+                let _ = tx.send(ViewerEvent::Status(String::from(
+                    "json stream (powershell)",
+                )));
                 if tx.send(ViewerEvent::Frame(frame)).is_err() {
                     break;
                 }
@@ -1173,15 +1241,24 @@ fn draw_wireframe_cube(
     }
 
     painter.line_segment(
-        [center, project_vertex(center, radius * 1.2, [1.6, 0.0, 0.0], orientation)],
+        [
+            center,
+            project_vertex(center, radius * 1.2, [1.6, 0.0, 0.0], orientation),
+        ],
         egui::Stroke::new(2.0, egui::Color32::RED),
     );
     painter.line_segment(
-        [center, project_vertex(center, radius * 1.2, [0.0, 1.6, 0.0], orientation)],
+        [
+            center,
+            project_vertex(center, radius * 1.2, [0.0, 1.6, 0.0], orientation),
+        ],
         egui::Stroke::new(2.0, egui::Color32::GREEN),
     );
     painter.line_segment(
-        [center, project_vertex(center, radius * 1.2, [0.0, 0.0, 1.6], orientation)],
+        [
+            center,
+            project_vertex(center, radius * 1.2, [0.0, 0.0, 1.6], orientation),
+        ],
         egui::Stroke::new(2.0, egui::Color32::BLUE),
     );
 }

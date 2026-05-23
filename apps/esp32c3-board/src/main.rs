@@ -3,26 +3,29 @@
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
+extern crate alloc;
+
 mod board;
 
+use alloc::string::String;
+use alloc::vec::Vec;
 use embassy_executor::Spawner;
 use embassy_time::{Instant, Timer};
+use esp_hal::clock::CpuClock;
 use esp_hal::gpio::{Level, Output, OutputConfig};
-use esp_hal::spi::master::{Config, Spi};
 use esp_hal::spi::Mode;
+use esp_hal::spi::master::{Config, Spi};
 use esp_hal::time::Rate;
 use esp_hal::timer::timg::TimerGroup;
 use esp_hal::usb_serial_jtag::UsbSerialJtag;
-use esp_hal::clock::CpuClock;
 use esp_println::println;
-use heapless::Vec;
 use imu_core::{
-    encode_binary_packet, encode_json, BusDescriptor, ImuBus, ImuConfig, ImuDescriptor,
-    ImuDriver, ImuKind, ImuLocation, OrientationFrame, WireFormat,
+    BusDescriptor, ImuBus, ImuChip, ImuDescriptor, ImuDriver, ImuSampleConfig, OrientationFrame,
+    RangeDps, RangeG, SampleRateHz, SpiProfile, WireFormat, encode_binary_packet, encode_json,
 };
-use imu_fusion::{FusionFilter, FusionFilterSettings};
 use imu_firmware::runtime::probe_first_matching;
-use imu_firmware::transport::{heapless_string, SessionRuntime};
+use imu_firmware::transport::{SessionRuntime, bounded_string};
+use imu_fusion::{FusionFilter, FusionFilterSettings};
 use imu_platform_esp::bus::EspImuBus;
 use imu_platform_esp::resources::EspDriverResources;
 
@@ -38,7 +41,8 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
 struct DetectedImu {
     name: &'static str,
     driver: &'static dyn ImuDriver,
-    profile: imu_core::BusProfile,
+    profile: SpiProfile,
+    sample_config: ImuSampleConfig,
 }
 
 struct ImuRuntime {
@@ -142,11 +146,12 @@ async fn main(_spawner: Spawner) -> ! {
     };
     let mut transport = Transport::new(usb, board::TRANSPORT_MODE);
     let resources = EspDriverResources;
-    let imu_config = ImuConfig::default();
     let boot = Instant::now();
     let mut session = SessionRuntime::new(board::SYSTEM_ID, 1, transport.format());
 
-    let mut runtimes = board::BOARD_IMUS.each_ref().map(|config| ImuRuntime::new(config));
+    let mut runtimes = board::BOARD_IMUS
+        .each_ref()
+        .map(|config| ImuRuntime::new(config));
     let mut heartbeat_count: u32 = 0;
 
     Timer::after_millis(board::POWER_UP_DELAY_MS).await;
@@ -156,9 +161,10 @@ async fn main(_spawner: Spawner) -> ! {
     for runtime in &mut runtimes {
         match probe_first_matching(&mut bus, runtime.config.target, runtime.config.candidates) {
             Ok(Some((driver, profile))) => {
-                let result = driver
-                    .reset(&mut bus, runtime.config.target)
-                    .and_then(|_| driver.configure(&mut bus, runtime.config.target, &imu_config, &resources));
+                let sample_config = select_imu_sample_config(driver);
+                let result = driver.reset(&mut bus, runtime.config.target).and_then(|_| {
+                    driver.configure(&mut bus, runtime.config.target, &sample_config, &resources)
+                });
 
                 match result {
                     Ok(()) => {
@@ -167,29 +173,34 @@ async fn main(_spawner: Spawner) -> ! {
                                 .config
                                 .candidates
                                 .iter()
-                                .find(|candidate| core::ptr::eq(candidate.descriptor.driver, driver))
+                                .find(|candidate| {
+                                    core::ptr::eq(candidate.descriptor.driver, driver)
+                                })
                                 .map(|candidate| candidate.descriptor.name)
                                 .unwrap_or("unknown"),
                             driver,
                             profile,
+                            sample_config,
                         });
-                        runtime.fusion = Some(FusionFilter::new(FusionFilterSettings::default()));
+                        let mut fusion_settings = FusionFilterSettings::default();
+                        fusion_settings.gyroscope_range_dps = sample_config.gyro_range.0 as f32;
+                        runtime.fusion = Some(FusionFilter::new(fusion_settings));
                         runtime.last_orientation_timestamp_us = None;
                         transport.emit_frame(&session.probe_result(
                             uptime_ms(boot),
                             runtime.config.imu_id,
                             runtime.detected.unwrap().name,
-                            driver.kind(),
+                            driver.chip(),
                             true,
                             None,
                             Some(profile),
                         ));
-                        if driver.kind() != runtime.config.expected {
+                        if driver.chip() != runtime.config.expected {
                             transport.emit_frame(&session.error(
                                 uptime_ms(boot),
                                 Some(runtime.config.imu_id),
                                 imu_core::ImuError::ChipNotFound,
-                                "detected kind mismatches expected kind",
+                                "detected chip mismatches expected chip",
                             ));
                         }
                     }
@@ -198,7 +209,7 @@ async fn main(_spawner: Spawner) -> ! {
                             uptime_ms(boot),
                             runtime.config.imu_id,
                             "probe-match",
-                            driver.kind(),
+                            driver.chip(),
                             false,
                             Some(error),
                             None,
@@ -211,7 +222,7 @@ async fn main(_spawner: Spawner) -> ! {
                     uptime_ms(boot),
                     runtime.config.imu_id,
                     "none",
-                    ImuKind::Unknown,
+                    ImuChip::Unknown,
                     false,
                     None,
                     None,
@@ -220,11 +231,7 @@ async fn main(_spawner: Spawner) -> ! {
                     uptime_ms(boot),
                     Some(runtime.config.imu_id),
                     imu_core::ImuError::ChipNotFound,
-                    &probe_snapshot(
-                        &mut bus,
-                        runtime.config.target,
-                        runtime.config.expected,
-                    ),
+                    &probe_snapshot(&mut bus, runtime.config.target, runtime.config.expected),
                 ));
             }
             Err(error) => {
@@ -269,14 +276,17 @@ async fn main(_spawner: Spawner) -> ! {
                     transport.emit_frame(&session.sample(
                         uptime_ms(boot),
                         runtime.config.imu_id,
-                        detected.driver.kind(),
+                        detected.driver.chip(),
                         runtime.sample_index,
                         timestamp_us,
                         raw,
                         0x0001,
                     ));
 
-                    if let Some(scale) = imu_core::default_scale_profile_for_kind(detected.driver.kind()) {
+                    if let Some(scale) = imu_core::scale_profile_for_config(
+                        detected.driver.chip(),
+                        &detected.sample_config,
+                    ) {
                         if let Some(fusion) = runtime.fusion.as_mut() {
                             let physical = raw.to_physical(scale);
                             let accel_ms2 = [
@@ -290,20 +300,23 @@ async fn main(_spawner: Spawner) -> ! {
                                 physical.gyro_dps[2].to_radians(),
                             ];
                             let dt_s = if let Some(last) = runtime.last_orientation_timestamp_us {
-                                ((timestamp_us.saturating_sub(last)) as f32 / 1_000_000.0).clamp(0.0, 0.1)
+                                ((timestamp_us.saturating_sub(last)) as f32 / 1_000_000.0)
+                                    .clamp(0.0, 0.1)
                             } else {
                                 0.0
                             };
                             runtime.last_orientation_timestamp_us = Some(timestamp_us);
                             let quaternion = fusion.update_imu(accel_ms2, gyro_rads, dt_s);
-                            transport.emit_frame(&imu_core::WireFrame::Orientation(OrientationFrame {
-                                header: session.header(uptime_ms(boot)),
-                                imu_id: runtime.config.imu_id,
-                                imu_kind: detected.driver.kind(),
-                                sample_index: runtime.sample_index,
-                                timestamp_us,
-                                quaternion,
-                            }));
+                            transport.emit_frame(&imu_core::WireFrame::Orientation(
+                                OrientationFrame {
+                                    header: session.header(uptime_ms(boot)),
+                                    imu_id: runtime.config.imu_id,
+                                    imu_chip: detected.driver.chip(),
+                                    sample_index: runtime.sample_index,
+                                    timestamp_us,
+                                    quaternion,
+                                },
+                            ));
                         }
                     }
                 }
@@ -337,46 +350,63 @@ fn uptime_ms(boot: Instant) -> u32 {
     Instant::now().duration_since(boot).as_millis() as u32
 }
 
-fn bus_descriptors() -> Vec<BusDescriptor, 8> {
+fn bus_descriptors() -> Vec<BusDescriptor> {
     let mut buses = Vec::new();
-    let _ = buses.push(BusDescriptor {
+    buses.push(BusDescriptor {
         bus_id: board::BUS_ID,
-        label: heapless_string::<32>("spi2"),
+        label: bounded_string("spi2", imu_core::MAX_LABEL_LEN),
     });
     buses
 }
 
-fn imu_descriptors(runtimes: &[ImuRuntime; 5]) -> Vec<ImuDescriptor, 16> {
+fn imu_descriptors(runtimes: &[ImuRuntime; 5]) -> Vec<ImuDescriptor> {
     let mut imus = Vec::new();
     for runtime in runtimes {
-        let kind = runtime
+        let chip = runtime
             .detected
-            .map(|detected| detected.driver.kind())
-            .unwrap_or(ImuKind::Unknown);
-        let capabilities = runtime
+            .map(|detected| detected.driver.chip())
+            .unwrap_or(ImuChip::Unknown);
+        let supported_sample_configs = runtime
             .detected
-            .map(|detected| detected.driver.capabilities())
+            .map(|detected| detected.driver.supported_sample_configs())
             .unwrap_or_default();
+        let sample_config = runtime.detected.map(|detected| detected.sample_config);
 
         let descriptor = ImuDescriptor {
             id: runtime.config.imu_id,
             bus_id: board::BUS_ID,
-            kind,
-            location: ImuLocation::Slot(runtime.config.imu_id.sensor_id as u8),
-            label: heapless_string::<32>(runtime.config.label),
-            capabilities,
+            chip,
+            label: bounded_string(runtime.config.label, imu_core::MAX_LABEL_LEN),
+            sample_config,
+            supported_sample_configs,
         };
-        let _ = imus.push(descriptor);
+        imus.push(descriptor);
     }
     imus
 }
 
+fn select_imu_sample_config(driver: &dyn ImuDriver) -> ImuSampleConfig {
+    let supported_sample_configs = driver.supported_sample_configs();
+    let preferred = ImuSampleConfig {
+        accel_range: RangeG(8),
+        gyro_range: RangeDps(500),
+        sample_rate_hz: SampleRateHz(100),
+    };
+
+    supported_sample_configs
+        .iter()
+        .copied()
+        .find(|config| *config == preferred)
+        .or_else(|| supported_sample_configs.first().copied())
+        .unwrap_or(preferred)
+}
+
 fn probe_snapshot(
-    bus: &mut dyn ImuBus,
+    bus: &mut dyn ImuBus<Profile = SpiProfile>,
     target: imu_core::ImuTargetId,
-    expected: ImuKind,
-) -> heapless::String<96> {
-    if expected == ImuKind::Bmi270 {
+    expected: ImuChip,
+) -> String {
+    if expected == ImuChip::Bmi270 {
         return bmi270_probe_snapshot(bus, target);
     }
 
@@ -390,7 +420,7 @@ fn probe_snapshot(
     let r01_m3 = bus.read_reg(target, 0x01, 0).ok().unwrap_or(0xFF);
     let r75_m3 = bus.read_reg(target, 0x75, 0).ok().unwrap_or(0xFF);
 
-    let mut out = heapless::String::<96>::new();
+    let mut out = String::new();
     let _ = core::fmt::write(
         &mut out,
         format_args!(
@@ -401,10 +431,7 @@ fn probe_snapshot(
     out
 }
 
-fn bmi270_probe_snapshot(
-    bus: &mut dyn ImuBus,
-    target: imu_core::ImuTargetId,
-) -> heapless::String<96> {
+fn bmi270_probe_snapshot(bus: &mut dyn ImuBus<Profile = SpiProfile>, target: imu_core::ImuTargetId) -> String {
     let _ = bus.apply_profile(target, board::PROFILE_MODE0_100K);
     let r00_m0_d0 = bus.read_reg(target, 0x00, 0).ok().unwrap_or(0xFF);
     let r00_m0_d1 = bus.read_reg(target, 0x00, 1).ok().unwrap_or(0xFF);
@@ -415,7 +442,7 @@ fn bmi270_probe_snapshot(
     let r00_m3_d1 = bus.read_reg(target, 0x00, 1).ok().unwrap_or(0xFF);
     let r21_m3_d1 = bus.read_reg(target, 0x21, 1).ok().unwrap_or(0xFF);
 
-    let mut out = heapless::String::<96>::new();
+    let mut out = String::new();
     let _ = core::fmt::write(
         &mut out,
         format_args!(

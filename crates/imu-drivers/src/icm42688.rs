@@ -1,8 +1,7 @@
 use imu_core::{
-    ImuBus, ImuCapabilities, ImuConfig, ImuDriver, ImuError, ImuKind, ImuTargetId, RangeDps,
-    RangeG, RawSample, ScaleProfile,
+    DriverResources, ImuBus, ImuChip, ImuDriver, ImuError, ImuSampleConfig, ImuTargetId, RangeDps,
+    RangeG, RawSample, SampleRateHz, ScaleProfile, SpiProfile,
 };
-use imu_core::{DriverResources, FilterProfile};
 
 const CHIP_ID: u8 = 0x05;
 const REVISION_ID: u8 = 0x7C;
@@ -26,11 +25,11 @@ pub static DESCRIPTOR: crate::DriverDescriptor = crate::DriverDescriptor {
 pub struct Icm42688Driver;
 
 impl ImuDriver for Icm42688Driver {
-    fn kind(&self) -> ImuKind {
-        ImuKind::Icm42688Pc
+    fn chip(&self) -> ImuChip {
+        ImuChip::Icm42688Pc
     }
 
-    fn probe(&self, bus: &mut dyn ImuBus, target: ImuTargetId) -> Result<bool, ImuError> {
+    fn probe(&self, bus: &mut dyn ImuBus<Profile = SpiProfile>, target: ImuTargetId) -> Result<bool, ImuError> {
         for _ in 0..3 {
             let id = bus.read_reg(target, REG_WHO_AM_I, 0)?;
             let revision = bus.read_reg(target, REG_REVISION_ID, 0)?;
@@ -42,18 +41,18 @@ impl ImuDriver for Icm42688Driver {
         Ok(false)
     }
 
-    fn reset(&self, _bus: &mut dyn ImuBus, _target: ImuTargetId) -> Result<(), ImuError> {
+    fn reset(&self, _bus: &mut dyn ImuBus<Profile = SpiProfile>, _target: ImuTargetId) -> Result<(), ImuError> {
         Ok(())
     }
 
     fn configure(
         &self,
-        bus: &mut dyn ImuBus,
+        bus: &mut dyn ImuBus<Profile = SpiProfile>,
         target: ImuTargetId,
-        config: &ImuConfig,
+        config: &ImuSampleConfig,
         _resources: &dyn DriverResources,
     ) -> Result<(), ImuError> {
-        let _ = config.filter_profile == FilterProfile::Balanced;
+        crate::ensure_supported_sample_config(self.supported_sample_configs(), config)?;
         bus.write_reg(target, REG_CTRL1, 0x20)?;
         bus.write_reg(target, REG_CTRL2, 0x06)?;
         bus.write_reg(target, REG_CTRL3, 0x76)?;
@@ -63,7 +62,7 @@ impl ImuDriver for Icm42688Driver {
         Ok(())
     }
 
-    fn read_raw(&self, bus: &mut dyn ImuBus, target: ImuTargetId) -> Result<RawSample, ImuError> {
+    fn read_raw(&self, bus: &mut dyn ImuBus<Profile = SpiProfile>, target: ImuTargetId) -> Result<RawSample, ImuError> {
         for _ in 0..10 {
             let status = bus.read_reg(target, REG_STATUS0, 0)?;
             if status & 0x03 == 0x03 {
@@ -83,18 +82,16 @@ impl ImuDriver for Icm42688Driver {
         }
     }
 
-    fn capabilities(&self) -> ImuCapabilities {
-        ImuCapabilities {
-            has_temp: false,
-            supports_fifo: false,
-            supports_data_ready_interrupt: false,
-            supported_accel_ranges: [Some(RangeG(2)), Some(RangeG(4)), Some(RangeG(8)), Some(RangeG(16))],
-            supported_gyro_ranges: [Some(RangeDps(250)), Some(RangeDps(500)), Some(RangeDps(1000)), Some(RangeDps(2000))],
-        }
+    fn supported_sample_configs(&self) -> alloc::vec::Vec<ImuSampleConfig> {
+        alloc::vec![ImuSampleConfig {
+            accel_range: RangeG(2),
+            gyro_range: RangeDps(2048),
+            sample_rate_hz: SampleRateHz(100),
+        }]
     }
 }
 
-fn read_sample(bus: &mut dyn ImuBus, target: ImuTargetId) -> Result<RawSample, ImuError> {
+fn read_sample(bus: &mut dyn ImuBus<Profile = SpiProfile>, target: ImuTargetId) -> Result<RawSample, ImuError> {
     Ok(RawSample {
         accel: [
             read_i16_le(bus, target, REG_AX_L)?,
@@ -110,7 +107,7 @@ fn read_sample(bus: &mut dyn ImuBus, target: ImuTargetId) -> Result<RawSample, I
     })
 }
 
-fn read_i16_le(bus: &mut dyn ImuBus, target: ImuTargetId, low_reg: u8) -> Result<i16, ImuError> {
+fn read_i16_le(bus: &mut dyn ImuBus<Profile = SpiProfile>, target: ImuTargetId, low_reg: u8) -> Result<i16, ImuError> {
     let low = bus.read_reg(target, low_reg, 0)?;
     let high = bus.read_reg(target, low_reg + 1, 0)?;
     Ok(i16::from_le_bytes([low, high]))

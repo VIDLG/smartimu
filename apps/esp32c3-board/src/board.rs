@@ -1,5 +1,5 @@
-use imu_core::{BusId, BusMode, BusProfile, ImuId, ImuKind, ImuTargetId};
-use imu_drivers::{bmi270, hxy42688, icm42688, lsm6, qmi8658, CandidateDriver};
+use imu_core::{BusId, SpiMode, SpiProfile, ImuChip, ImuId, ImuTargetId};
+use imu_drivers::{CandidateDriver, bmi270, hxy42688, icm42688, lsm6, qmi8658};
 
 #[allow(dead_code)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -9,7 +9,7 @@ pub enum TransportMode {
 }
 
 pub const SPI_FREQ_KHZ: u32 = 1_000;
-pub const STREAM_INTERVAL_MS: u64 = 50;
+pub const STREAM_INTERVAL_MS: u64 = 5;
 pub const POWER_UP_DELAY_MS: u64 = 500;
 pub const SYSTEM_ID: u16 = 1;
 pub const BUS_ID: BusId = BusId(0);
@@ -18,22 +18,22 @@ pub const TRANSPORT_MODE: TransportMode = TransportMode::Json;
 #[cfg(feature = "binary-transport")]
 pub const TRANSPORT_MODE: TransportMode = TransportMode::Binary;
 
-pub const PROFILE_MODE0: BusProfile = BusProfile::new(0, BusMode::Mode0, SPI_FREQ_KHZ);
-pub const PROFILE_MODE1: BusProfile = BusProfile::new(1, BusMode::Mode1, SPI_FREQ_KHZ);
-pub const PROFILE_MODE2: BusProfile = BusProfile::new(2, BusMode::Mode2, SPI_FREQ_KHZ);
-pub const PROFILE_MODE3: BusProfile = BusProfile::new(3, BusMode::Mode3, SPI_FREQ_KHZ);
-pub const PROFILE_MODE0_500K: BusProfile = BusProfile::new(4, BusMode::Mode0, 500);
-pub const PROFILE_MODE3_500K: BusProfile = BusProfile::new(5, BusMode::Mode3, 500);
-pub const PROFILE_MODE0_100K: BusProfile = BusProfile::new(6, BusMode::Mode0, 100);
-pub const PROFILE_MODE3_100K: BusProfile = BusProfile::new(7, BusMode::Mode3, 100);
+pub const PROFILE_MODE0: SpiProfile = SpiProfile::new(0, SpiMode::Mode0, SPI_FREQ_KHZ);
+pub const PROFILE_MODE1: SpiProfile = SpiProfile::new(1, SpiMode::Mode1, SPI_FREQ_KHZ);
+pub const PROFILE_MODE2: SpiProfile = SpiProfile::new(2, SpiMode::Mode2, SPI_FREQ_KHZ);
+pub const PROFILE_MODE3: SpiProfile = SpiProfile::new(3, SpiMode::Mode3, SPI_FREQ_KHZ);
+pub const PROFILE_MODE0_500K: SpiProfile = SpiProfile::new(4, SpiMode::Mode0, 500);
+pub const PROFILE_MODE3_500K: SpiProfile = SpiProfile::new(5, SpiMode::Mode3, 500);
+pub const PROFILE_MODE0_100K: SpiProfile = SpiProfile::new(6, SpiMode::Mode0, 100);
+pub const PROFILE_MODE3_100K: SpiProfile = SpiProfile::new(7, SpiMode::Mode3, 100);
 pub const SLOT3_OPTIONAL: bool = true;
 
-pub const PROFILES_MODE0: [BusProfile; 1] = [PROFILE_MODE0];
-pub const PROFILES_MODE3: [BusProfile; 1] = [PROFILE_MODE3];
-pub const PROFILES_MODE0_3: [BusProfile; 2] = [PROFILE_MODE0, PROFILE_MODE3];
-pub const PROFILES_ALL: [BusProfile; 4] =
+pub const PROFILES_MODE0: [SpiProfile; 1] = [PROFILE_MODE0];
+pub const PROFILES_MODE3: [SpiProfile; 1] = [PROFILE_MODE3];
+pub const PROFILES_MODE0_3: [SpiProfile; 2] = [PROFILE_MODE0, PROFILE_MODE3];
+pub const PROFILES_ALL: [SpiProfile; 4] =
     [PROFILE_MODE0, PROFILE_MODE1, PROFILE_MODE2, PROFILE_MODE3];
-pub const PROFILES_BMI: [BusProfile; 8] = [
+pub const PROFILES_BMI: [SpiProfile; 8] = [
     PROFILE_MODE3,
     PROFILE_MODE0,
     PROFILE_MODE1,
@@ -49,7 +49,7 @@ pub struct BoardImuConfig {
     pub imu_id: ImuId,
     pub target: ImuTargetId,
     pub label: &'static str,
-    pub expected: ImuKind,
+    pub expected: ImuChip,
     pub candidates: &'static [CandidateDriver],
 }
 
@@ -139,7 +139,7 @@ pub static BOARD_IMUS: [BoardImuConfig; 5] = [
             target_index: 0,
         },
         label: "slot-1",
-        expected: ImuKind::Icm42688Hxy,
+        expected: ImuChip::Icm42688Hxy,
         candidates: &SLOT1_CANDIDATES,
     },
     BoardImuConfig {
@@ -152,7 +152,7 @@ pub static BOARD_IMUS: [BoardImuConfig; 5] = [
             target_index: 1,
         },
         label: "slot-2",
-        expected: ImuKind::Icm42688Pc,
+        expected: ImuChip::Icm42688Pc,
         candidates: &SLOT2_CANDIDATES,
     },
     BoardImuConfig {
@@ -165,7 +165,7 @@ pub static BOARD_IMUS: [BoardImuConfig; 5] = [
             target_index: 2,
         },
         label: "slot-3",
-        expected: ImuKind::Bmi270,
+        expected: ImuChip::Bmi270,
         candidates: &SLOT3_CANDIDATES,
     },
     BoardImuConfig {
@@ -178,7 +178,7 @@ pub static BOARD_IMUS: [BoardImuConfig; 5] = [
             target_index: 3,
         },
         label: "slot-4",
-        expected: ImuKind::Qmi8658A,
+        expected: ImuChip::Qmi8658A,
         candidates: &SLOT4_CANDIDATES,
     },
     BoardImuConfig {
@@ -191,7 +191,7 @@ pub static BOARD_IMUS: [BoardImuConfig; 5] = [
             target_index: 4,
         },
         label: "slot-5",
-        expected: ImuKind::Sc7u22,
+        expected: ImuChip::Sc7u22,
         candidates: &SLOT5_CANDIDATES,
     },
 ];

@@ -132,7 +132,12 @@ impl FusionFilter {
         unsafe { FusionAhrsReset(&mut self.ahrs) };
     }
 
-    pub fn update_imu(&mut self, accel_ms2: [f32; 3], gyro_rads: [f32; 3], dt_s: f32) -> Quaternion {
+    pub fn update_imu(
+        &mut self,
+        accel_ms2: [f32; 3],
+        gyro_rads: [f32; 3],
+        dt_s: f32,
+    ) -> Quaternion {
         let accelerometer = FusionVector {
             axis: FusionAxes {
                 x: accel_ms2[0],

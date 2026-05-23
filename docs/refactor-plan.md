@@ -60,7 +60,6 @@
 - `ImuId { system_id: u16, sensor_id: u16 }`
 - `ImuKind`
 - `ImuDescriptor`
-- `ImuLocation`
 - `BusId`
 - `RawSample { accel: [i16; 3], gyro: [i16; 3], temp: Option<i16> }`
 - `PhysicalSample { accel_g: [f32; 3], gyro_dps: [f32; 3], temp_c: Option<f32> }`

@@ -62,9 +62,6 @@ contrib/
 
 - `Quaternion { w, x, y, z }`
 - `OrientationSample`
-- `ViewMode`
-  - `Raw6Axis`
-  - `Quaternion`
 
 协议扩展建议：
 

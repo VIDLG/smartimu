@@ -1,11 +1,10 @@
 use imu_core::{
-    DriverResources, ImuBus, ImuCapabilities, ImuConfig, ImuDriver, ImuError, ImuKind,
-    ImuTargetId, RangeDps, RangeG, RawSample, ScaleProfile,
+    DriverResources, ImuBus, ImuChip, ImuDriver, ImuError, ImuSampleConfig, ImuTargetId, RangeDps,
+    RangeG, RawSample, SampleRateHz, ScaleProfile, SpiProfile,
 };
 
 const CHIP_ID: u8 = 0x05;
 const CHIP_ID_ALT: u8 = 0x3E;
-const REVISION_ID: u8 = 0x68;
 
 const REG_WHO_AM_I: u8 = 0x00;
 const REG_REVISION_ID: u8 = 0x01;
@@ -27,17 +26,15 @@ pub static DESCRIPTOR: crate::DriverDescriptor = crate::DriverDescriptor {
 pub struct Qmi8658Driver;
 
 impl ImuDriver for Qmi8658Driver {
-    fn kind(&self) -> ImuKind {
-        ImuKind::Qmi8658A
+    fn chip(&self) -> ImuChip {
+        ImuChip::Qmi8658A
     }
 
-    fn probe(&self, bus: &mut dyn ImuBus, target: ImuTargetId) -> Result<bool, ImuError> {
+    fn probe(&self, bus: &mut dyn ImuBus<Profile = SpiProfile>, target: ImuTargetId) -> Result<bool, ImuError> {
         for _ in 0..3 {
             let id = bus.read_reg(target, REG_WHO_AM_I, 0)?;
             let revision = bus.read_reg(target, REG_REVISION_ID, 0)?;
-            if id == CHIP_ID
-                || (id == CHIP_ID_ALT && revision == CHIP_ID_ALT)
-            {
+            if id == CHIP_ID || (id == CHIP_ID_ALT && revision == CHIP_ID_ALT) {
                 return Ok(true);
             }
             bus.delay_ms(5);
@@ -45,7 +42,7 @@ impl ImuDriver for Qmi8658Driver {
         Ok(false)
     }
 
-    fn reset(&self, bus: &mut dyn ImuBus, target: ImuTargetId) -> Result<(), ImuError> {
+    fn reset(&self, bus: &mut dyn ImuBus<Profile = SpiProfile>, target: ImuTargetId) -> Result<(), ImuError> {
         bus.write_reg(target, REG_RESET, 0xB0)?;
         bus.delay_ms(20);
         Ok(())
@@ -53,11 +50,12 @@ impl ImuDriver for Qmi8658Driver {
 
     fn configure(
         &self,
-        bus: &mut dyn ImuBus,
+        bus: &mut dyn ImuBus<Profile = SpiProfile>,
         target: ImuTargetId,
-        _config: &ImuConfig,
+        config: &ImuSampleConfig,
         _resources: &dyn DriverResources,
     ) -> Result<(), ImuError> {
+        crate::ensure_supported_sample_config(self.supported_sample_configs(), config)?;
         bus.write_reg(target, REG_CTRL1, 0x20)?;
         bus.write_reg(target, REG_CTRL2, 0x06)?;
         bus.write_reg(target, REG_CTRL3, 0x76)?;
@@ -67,7 +65,7 @@ impl ImuDriver for Qmi8658Driver {
         Ok(())
     }
 
-    fn read_raw(&self, bus: &mut dyn ImuBus, target: ImuTargetId) -> Result<RawSample, ImuError> {
+    fn read_raw(&self, bus: &mut dyn ImuBus<Profile = SpiProfile>, target: ImuTargetId) -> Result<RawSample, ImuError> {
         for _ in 0..10 {
             let status = bus.read_reg(target, REG_STATUS0, 0)?;
             if status & 0x03 == 0x03 {
@@ -87,18 +85,16 @@ impl ImuDriver for Qmi8658Driver {
         }
     }
 
-    fn capabilities(&self) -> ImuCapabilities {
-        ImuCapabilities {
-            has_temp: false,
-            supports_fifo: false,
-            supports_data_ready_interrupt: false,
-            supported_accel_ranges: [Some(RangeG(2)), Some(RangeG(4)), Some(RangeG(8)), Some(RangeG(16))],
-            supported_gyro_ranges: [Some(RangeDps(250)), Some(RangeDps(500)), Some(RangeDps(1000)), Some(RangeDps(2000))],
-        }
+    fn supported_sample_configs(&self) -> alloc::vec::Vec<ImuSampleConfig> {
+        alloc::vec![ImuSampleConfig {
+            accel_range: RangeG(2),
+            gyro_range: RangeDps(2048),
+            sample_rate_hz: SampleRateHz(100),
+        }]
     }
 }
 
-fn read_sample(bus: &mut dyn ImuBus, target: ImuTargetId) -> Result<RawSample, ImuError> {
+fn read_sample(bus: &mut dyn ImuBus<Profile = SpiProfile>, target: ImuTargetId) -> Result<RawSample, ImuError> {
     Ok(RawSample {
         accel: [
             read_i16_le(bus, target, REG_AX_L)?,
@@ -114,7 +110,7 @@ fn read_sample(bus: &mut dyn ImuBus, target: ImuTargetId) -> Result<RawSample, I
     })
 }
 
-fn read_i16_le(bus: &mut dyn ImuBus, target: ImuTargetId, low_reg: u8) -> Result<i16, ImuError> {
+fn read_i16_le(bus: &mut dyn ImuBus<Profile = SpiProfile>, target: ImuTargetId, low_reg: u8) -> Result<i16, ImuError> {
     let low = bus.read_reg(target, low_reg, 0)?;
     let high = bus.read_reg(target, low_reg + 1, 0)?;
     Ok(i16::from_le_bytes([low, high]))

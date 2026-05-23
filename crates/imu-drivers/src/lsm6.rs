@@ -1,6 +1,6 @@
 use imu_core::{
-    DriverResources, ImuBus, ImuCapabilities, ImuConfig, ImuDriver, ImuError, ImuKind,
-    ImuTargetId, RangeDps, RangeG, RawSample, ScaleProfile,
+    DriverResources, ImuBus, ImuChip, ImuDriver, ImuError, ImuSampleConfig, ImuTargetId, RangeDps,
+    RangeG, RawSample, SampleRateHz, ScaleProfile, SpiProfile,
 };
 
 const CHIP_ID: u8 = 0x6A;
@@ -23,11 +23,11 @@ pub static DESCRIPTOR: crate::DriverDescriptor = crate::DriverDescriptor {
 pub struct Lsm6Driver;
 
 impl ImuDriver for Lsm6Driver {
-    fn kind(&self) -> ImuKind {
-        ImuKind::Sc7u22
+    fn chip(&self) -> ImuChip {
+        ImuChip::Sc7u22
     }
 
-    fn probe(&self, bus: &mut dyn ImuBus, target: ImuTargetId) -> Result<bool, ImuError> {
+    fn probe(&self, bus: &mut dyn ImuBus<Profile = SpiProfile>, target: ImuTargetId) -> Result<bool, ImuError> {
         for _ in 0..3 {
             let id = bus.read_reg(target, REG_WHO_AM_I, 0)?;
             let com_cfg = bus.read_reg(target, REG_COM_CFG, 0)?;
@@ -39,28 +39,29 @@ impl ImuDriver for Lsm6Driver {
         Ok(false)
     }
 
-    fn reset(&self, _bus: &mut dyn ImuBus, _target: ImuTargetId) -> Result<(), ImuError> {
+    fn reset(&self, _bus: &mut dyn ImuBus<Profile = SpiProfile>, _target: ImuTargetId) -> Result<(), ImuError> {
         Ok(())
     }
 
     fn configure(
         &self,
-        bus: &mut dyn ImuBus,
+        bus: &mut dyn ImuBus<Profile = SpiProfile>,
         target: ImuTargetId,
-        _config: &ImuConfig,
+        config: &ImuSampleConfig,
         _resources: &dyn DriverResources,
     ) -> Result<(), ImuError> {
+        crate::ensure_supported_sample_config(self.supported_sample_configs(), config)?;
         bus.write_reg(target, REG_PWR_CTRL, 0x0E)?;
         bus.delay_ms(10);
         bus.write_reg(target, REG_ACC_CONF, 0xA8)?;
-        bus.write_reg(target, REG_ACC_RANGE, 0x02)?;
+        bus.write_reg(target, REG_ACC_RANGE, accel_range_reg(config.accel_range)?)?;
         bus.write_reg(target, REG_GYR_CONF, 0xA8)?;
-        bus.write_reg(target, REG_GYR_RANGE, 0x02)?;
+        bus.write_reg(target, REG_GYR_RANGE, gyro_range_reg(config.gyro_range)?)?;
         bus.delay_ms(5);
         Ok(())
     }
 
-    fn read_raw(&self, bus: &mut dyn ImuBus, target: ImuTargetId) -> Result<RawSample, ImuError> {
+    fn read_raw(&self, bus: &mut dyn ImuBus<Profile = SpiProfile>, target: ImuTargetId) -> Result<RawSample, ImuError> {
         let status = bus.read_reg(target, REG_DATA_STAT, 0)?;
         if status & 0x03 == 0 {
             return Err(ImuError::DataNotReady);
@@ -92,13 +93,49 @@ impl ImuDriver for Lsm6Driver {
         }
     }
 
-    fn capabilities(&self) -> ImuCapabilities {
-        ImuCapabilities {
-            has_temp: false,
-            supports_fifo: false,
-            supports_data_ready_interrupt: false,
-            supported_accel_ranges: [Some(RangeG(4)), Some(RangeG(8)), Some(RangeG(16)), None],
-            supported_gyro_ranges: [Some(RangeDps(250)), Some(RangeDps(500)), Some(RangeDps(1000)), None],
+    fn supported_sample_configs(&self) -> alloc::vec::Vec<ImuSampleConfig> {
+        supported_sample_configs(
+            &[RangeG(4), RangeG(8), RangeG(16)],
+            &[RangeDps(250), RangeDps(500), RangeDps(1000)],
+            &[SampleRateHz(100)],
+        )
+    }
+}
+
+fn accel_range_reg(range: RangeG) -> Result<u8, ImuError> {
+    match range {
+        RangeG(4) => Ok(0x01),
+        RangeG(8) => Ok(0x02),
+        RangeG(16) => Ok(0x03),
+        _ => Err(ImuError::UnsupportedConfig),
+    }
+}
+
+fn gyro_range_reg(range: RangeDps) -> Result<u8, ImuError> {
+    match range {
+        RangeDps(1000) => Ok(0x01),
+        RangeDps(500) => Ok(0x02),
+        RangeDps(250) => Ok(0x03),
+        _ => Err(ImuError::UnsupportedConfig),
+    }
+}
+
+fn supported_sample_configs(
+    accel_ranges: &[RangeG],
+    gyro_ranges: &[RangeDps],
+    sample_rates: &[SampleRateHz],
+) -> alloc::vec::Vec<ImuSampleConfig> {
+    let mut configs = alloc::vec::Vec::new();
+    for accel_range in accel_ranges {
+        for gyro_range in gyro_ranges {
+            for sample_rate_hz in sample_rates {
+                configs.push(ImuSampleConfig {
+                    accel_range: *accel_range,
+                    gyro_range: *gyro_range,
+                    sample_rate_hz: *sample_rate_hz,
+                });
+            }
         }
     }
+    configs
 }

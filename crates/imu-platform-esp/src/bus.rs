@@ -4,7 +4,7 @@ use esp_hal::Blocking;
 use esp_hal::gpio::Output;
 use esp_hal::spi::master::{Config, Spi};
 use esp_hal::time::Rate;
-use imu_core::{BusMode, BusProfile, ImuBus, ImuError, ImuTargetId};
+use imu_core::{SpiMode, SpiProfile, ImuBus, ImuError, ImuTargetId};
 
 const MAX_WRITE_BYTES: usize = 40;
 const MAX_READ_BYTES: usize = 64;
@@ -35,18 +35,20 @@ impl<'a, 'd, const N: usize> EspImuBus<'a, 'd, N> {
             .ok_or(ImuError::InvalidTarget)
     }
 
-    fn mode(profile: BusProfile) -> esp_hal::spi::Mode {
+    fn mode(profile: SpiProfile) -> esp_hal::spi::Mode {
         match profile.mode {
-            BusMode::Mode0 => esp_hal::spi::Mode::_0,
-            BusMode::Mode1 => esp_hal::spi::Mode::_1,
-            BusMode::Mode2 => esp_hal::spi::Mode::_2,
-            BusMode::Mode3 => esp_hal::spi::Mode::_3,
+            SpiMode::Mode0 => esp_hal::spi::Mode::_0,
+            SpiMode::Mode1 => esp_hal::spi::Mode::_1,
+            SpiMode::Mode2 => esp_hal::spi::Mode::_2,
+            SpiMode::Mode3 => esp_hal::spi::Mode::_3,
         }
     }
 }
 
 impl<const N: usize> ImuBus for EspImuBus<'_, '_, N> {
-    fn apply_profile(&mut self, _target: ImuTargetId, profile: BusProfile) -> Result<(), ImuError> {
+    type Profile = SpiProfile;
+
+    fn apply_profile(&mut self, _target: ImuTargetId, profile: SpiProfile) -> Result<(), ImuError> {
         self.spi
             .apply_config(
                 &Config::default()
@@ -56,12 +58,7 @@ impl<const N: usize> ImuBus for EspImuBus<'_, '_, N> {
             .map_err(|_| ImuError::ConfigError)
     }
 
-    fn write_regs(
-        &mut self,
-        target: ImuTargetId,
-        reg: u8,
-        data: &[u8],
-    ) -> Result<(), ImuError> {
+    fn write_regs(&mut self, target: ImuTargetId, reg: u8, data: &[u8]) -> Result<(), ImuError> {
         let total = 1 + data.len();
         if total > MAX_WRITE_BYTES {
             return Err(ImuError::ConfigError);

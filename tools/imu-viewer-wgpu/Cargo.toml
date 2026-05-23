@@ -1,17 +1,21 @@
 [package]
-name = "imu-viewer"
+name = "imu-viewer-wgpu"
 edition.workspace = true
 rust-version.workspace = true
 version.workspace = true
 
 [dependencies]
-eframe.workspace = true
+bytemuck.workspace = true
 egui.workspace = true
-egui_plot.workspace = true
+egui-wgpu.workspace = true
+egui-winit.workspace = true
 imu-core = { path = "../../crates/imu-core", features = ["json", "std-json", "binary", "std"] }
+pollster.workspace = true
 serialport.workspace = true
-serde_json.workspace = true
+wgpu.workspace = true
+winit.workspace = true
+windows-sys.workspace = true
 
 [[bin]]
-name = "imu-viewer"
+name = "imu-viewer-wgpu"
 path = "src/main.rs"

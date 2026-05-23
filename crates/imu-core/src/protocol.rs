@@ -1,9 +1,11 @@
-use heapless::{String, Vec};
+use alloc::string::String;
+use alloc::vec::Vec;
 use serde::{Deserialize, Serialize};
 
-use crate::bus::{BusId, BusProfile};
+use crate::bus::SpiProfile;
+use crate::error::ImuError;
 use crate::sample::RawSample;
-use crate::types::{ImuDescriptor, ImuError, ImuId, ImuKind, Quaternion};
+use crate::types::{BusId, ImuChip, ImuDescriptor, ImuId, Quaternion};
 
 pub const PROTOCOL_VERSION: u8 = 1;
 pub const MAX_IMUS_PER_SYSTEM: usize = 16;
@@ -40,38 +42,38 @@ pub struct WireHeader {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BusDescriptor {
     pub bus_id: BusId,
-    pub label: String<MAX_LABEL_LEN>,
+    pub label: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HelloFrame {
     pub header: WireHeader,
-    pub system_label: String<MAX_LABEL_LEN>,
+    pub system_label: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TopologyFrame {
     pub header: WireHeader,
-    pub buses: Vec<BusDescriptor, MAX_BUSES_PER_SYSTEM>,
-    pub imus: Vec<ImuDescriptor, MAX_IMUS_PER_SYSTEM>,
+    pub buses: Vec<BusDescriptor>,
+    pub imus: Vec<ImuDescriptor>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProbeResultFrame {
     pub header: WireHeader,
     pub imu_id: ImuId,
-    pub driver_name: String<MAX_LABEL_LEN>,
-    pub detected_kind: ImuKind,
+    pub driver_name: String,
+    pub detected_chip: ImuChip,
     pub success: bool,
     pub error: Option<ImuError>,
-    pub profile: Option<BusProfile>,
+    pub profile: Option<SpiProfile>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SampleFrame {
     pub header: WireHeader,
     pub imu_id: ImuId,
-    pub imu_kind: ImuKind,
+    pub imu_chip: ImuChip,
     pub sample_index: u32,
     pub timestamp_us: u64,
     pub sample: RawSample,
@@ -82,7 +84,7 @@ pub struct SampleFrame {
 pub struct OrientationFrame {
     pub header: WireHeader,
     pub imu_id: ImuId,
-    pub imu_kind: ImuKind,
+    pub imu_chip: ImuChip,
     pub sample_index: u32,
     pub timestamp_us: u64,
     pub quaternion: Quaternion,
@@ -93,7 +95,7 @@ pub struct ErrorFrame {
     pub header: WireHeader,
     pub imu_id: Option<ImuId>,
     pub error: ImuError,
-    pub message: String<MAX_MESSAGE_LEN>,
+    pub message: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -114,8 +116,12 @@ pub enum WireFrame {
 }
 
 #[cfg(feature = "binary")]
-pub fn encode_binary<const N: usize>(frame: &WireFrame) -> Result<Vec<u8, N>, postcard::Error> {
-    postcard::to_vec::<WireFrame, N>(frame)
+pub fn encode_binary<const N: usize>(frame: &WireFrame) -> Result<Vec<u8>, BinaryCodecError> {
+    let encoded = postcard::to_allocvec(frame).map_err(|_| BinaryCodecError::Postcard)?;
+    if encoded.len() > N {
+        return Err(BinaryCodecError::BufferTooSmall);
+    }
+    Ok(encoded)
 }
 
 #[cfg(feature = "binary")]
@@ -126,11 +132,14 @@ pub fn decode_binary(bytes: &[u8]) -> Result<WireFrame, postcard::Error> {
 #[cfg(feature = "binary")]
 pub fn encode_binary_packet<const N: usize>(
     frame: &WireFrame,
-) -> Result<Vec<u8, N>, BinaryCodecError> {
-    let mut raw = postcard::to_vec::<WireFrame, N>(frame).map_err(|_| BinaryCodecError::Postcard)?;
+) -> Result<Vec<u8>, BinaryCodecError> {
+    let mut raw = postcard::to_allocvec(frame).map_err(|_| BinaryCodecError::Postcard)?;
+    if raw.len() + 4 > N {
+        return Err(BinaryCodecError::BufferTooSmall);
+    }
     let crc = crc32fast::hash(raw.as_slice()).to_le_bytes();
     for byte in crc {
-        raw.push(byte).map_err(|_| BinaryCodecError::BufferTooSmall)?;
+        raw.push(byte);
     }
 
     let encoded_len = cobs::max_encoding_length(raw.len());
@@ -142,16 +151,14 @@ pub fn encode_binary_packet<const N: usize>(
     let used = cobs::encode(raw.as_slice(), &mut scratch);
     let mut framed = Vec::new();
     for byte in &scratch[..used] {
-        framed.push(*byte).map_err(|_| BinaryCodecError::BufferTooSmall)?;
+        framed.push(*byte);
     }
-    framed.push(0).map_err(|_| BinaryCodecError::BufferTooSmall)?;
+    framed.push(0);
     Ok(framed)
 }
 
 #[cfg(feature = "binary")]
-pub fn decode_binary_packet<const N: usize>(
-    packet: &[u8],
-) -> Result<WireFrame, BinaryCodecError> {
+pub fn decode_binary_packet<const N: usize>(packet: &[u8]) -> Result<WireFrame, BinaryCodecError> {
     if packet.is_empty() {
         return Err(BinaryCodecError::Truncated);
     }
@@ -189,15 +196,12 @@ pub fn decode_binary_packet<const N: usize>(
 #[cfg(feature = "json")]
 pub fn encode_json<const N: usize>(
     frame: &WireFrame,
-) -> Result<String<N>, serde_json_core::ser::Error> {
+) -> Result<String, serde_json_core::ser::Error> {
     let mut output = [0u8; N];
     let written = serde_json_core::to_slice(frame, &mut output)?;
-    let mut s = String::new();
-    for byte in &output[..written] {
-        s.push(*byte as char)
-            .map_err(|_| serde_json_core::ser::Error::BufferFull)?;
-    }
-    Ok(s)
+    core::str::from_utf8(&output[..written])
+        .map(String::from)
+        .map_err(|_| serde_json_core::ser::Error::BufferFull)
 }
 
 #[cfg(feature = "std-json")]

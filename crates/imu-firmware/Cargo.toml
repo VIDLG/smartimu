@@ -5,6 +5,5 @@ rust-version.workspace = true
 version.workspace = true
 
 [dependencies]
-heapless.workspace = true
 imu-core = { path = "../imu-core", default-features = false }
 imu-drivers = { path = "../imu-drivers" }

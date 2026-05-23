@@ -1,4 +1,4 @@
-use crate::types::ImuKind;
+use crate::types::{ImuChip, ImuSampleConfig};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -36,34 +36,34 @@ impl RawSample {
     }
 }
 
-pub fn default_scale_profile_for_kind(kind: ImuKind) -> Option<ScaleProfile> {
-    let profile = match kind {
-        ImuKind::Unknown => return None,
-        ImuKind::Icm42688Hxy => ScaleProfile {
+pub fn default_scale_profile_for_chip(chip: ImuChip) -> Option<ScaleProfile> {
+    let profile = match chip {
+        ImuChip::Unknown => return None,
+        ImuChip::Icm42688Hxy => ScaleProfile {
             accel_g_per_lsb: 1.0 / 4096.0,
             gyro_dps_per_lsb: 1.0 / 16.4,
             temp_c_per_lsb: None,
             temp_offset_c: 0.0,
         },
-        ImuKind::Icm42688Pc => ScaleProfile {
+        ImuChip::Icm42688Pc => ScaleProfile {
             accel_g_per_lsb: 1.0 / 16384.0,
             gyro_dps_per_lsb: 1.0 / 16.0,
             temp_c_per_lsb: None,
             temp_offset_c: 0.0,
         },
-        ImuKind::Bmi270 => ScaleProfile {
+        ImuChip::Bmi270 => ScaleProfile {
             accel_g_per_lsb: 1.0 / 2048.0,
             gyro_dps_per_lsb: 1.0 / 16.4,
             temp_c_per_lsb: None,
             temp_offset_c: 0.0,
         },
-        ImuKind::Qmi8658A => ScaleProfile {
+        ImuChip::Qmi8658A => ScaleProfile {
             accel_g_per_lsb: 1.0 / 16384.0,
             gyro_dps_per_lsb: 1.0 / 16.0,
             temp_c_per_lsb: None,
             temp_offset_c: 0.0,
         },
-        ImuKind::Sc7u22 => ScaleProfile {
+        ImuChip::Sc7u22 => ScaleProfile {
             accel_g_per_lsb: 1.0 / 4096.0,
             gyro_dps_per_lsb: 500.0 / 32768.0,
             temp_c_per_lsb: None,
@@ -72,4 +72,17 @@ pub fn default_scale_profile_for_kind(kind: ImuKind) -> Option<ScaleProfile> {
     };
 
     Some(profile)
+}
+
+pub fn scale_profile_for_config(chip: ImuChip, config: &ImuSampleConfig) -> Option<ScaleProfile> {
+    if chip == ImuChip::Unknown {
+        return None;
+    }
+
+    Some(ScaleProfile {
+        accel_g_per_lsb: config.accel_range.0 as f32 / 32768.0,
+        gyro_dps_per_lsb: config.gyro_range.0 as f32 / 32768.0,
+        temp_c_per_lsb: None,
+        temp_offset_c: 0.0,
+    })
 }

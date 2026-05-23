@@ -1,11 +1,11 @@
-use imu_core::{BusProfile, ImuBus, ImuDriver, ImuError, ImuTargetId};
+use imu_core::{SpiProfile, ImuBus, ImuDriver, ImuError, ImuTargetId};
 use imu_drivers::CandidateDriver;
 
 pub fn probe_first_matching(
-    bus: &mut dyn ImuBus,
+    bus: &mut dyn ImuBus<Profile = SpiProfile>,
     target: ImuTargetId,
     candidates: &[CandidateDriver],
-) -> Result<Option<(&'static dyn ImuDriver, BusProfile)>, ImuError> {
+) -> Result<Option<(&'static dyn ImuDriver, SpiProfile)>, ImuError> {
     for candidate in candidates {
         for profile in candidate.profiles {
             bus.apply_profile(target, *profile)?;

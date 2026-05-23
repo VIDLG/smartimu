@@ -7,12 +7,12 @@ use embassy_executor::Spawner;
 use embassy_time::Timer;
 use esp_hal::clock::CpuClock;
 use esp_hal::gpio::{Level, Output, OutputConfig};
-use esp_hal::spi::master::{Config, Spi};
 use esp_hal::spi::Mode;
+use esp_hal::spi::master::{Config, Spi};
 use esp_hal::time::Rate;
 use esp_hal::timer::timg::TimerGroup;
 use esp_println::println;
-use imu_core::{BusId, BusMode, BusProfile, ImuBus, ImuTargetId};
+use imu_core::{BusId, SpiMode, SpiProfile, ImuBus, ImuTargetId};
 use imu_platform_esp::bus::EspImuBus;
 
 const BUS_ID: BusId = BusId(0);
@@ -21,20 +21,15 @@ const TARGET: ImuTargetId = ImuTargetId {
     target_index: 0,
 };
 
-const MODE0_100K: BusProfile = BusProfile::new(0, BusMode::Mode0, 100);
-const MODE0_500K: BusProfile = BusProfile::new(1, BusMode::Mode0, 500);
-const MODE0_1M: BusProfile = BusProfile::new(2, BusMode::Mode0, 1_000);
-const MODE3_100K: BusProfile = BusProfile::new(3, BusMode::Mode3, 100);
-const MODE3_500K: BusProfile = BusProfile::new(4, BusMode::Mode3, 500);
-const MODE3_1M: BusProfile = BusProfile::new(5, BusMode::Mode3, 1_000);
+const MODE0_100K: SpiProfile = SpiProfile::new(0, SpiMode::Mode0, 100);
+const MODE0_500K: SpiProfile = SpiProfile::new(1, SpiMode::Mode0, 500);
+const MODE0_1M: SpiProfile = SpiProfile::new(2, SpiMode::Mode0, 1_000);
+const MODE3_100K: SpiProfile = SpiProfile::new(3, SpiMode::Mode3, 100);
+const MODE3_500K: SpiProfile = SpiProfile::new(4, SpiMode::Mode3, 500);
+const MODE3_1M: SpiProfile = SpiProfile::new(5, SpiMode::Mode3, 1_000);
 
-const PROFILES: [BusProfile; 6] = [
-    MODE0_100K,
-    MODE0_500K,
-    MODE0_1M,
-    MODE3_100K,
-    MODE3_500K,
-    MODE3_1M,
+const PROFILES: [SpiProfile; 6] = [
+    MODE0_100K, MODE0_500K, MODE0_1M, MODE3_100K, MODE3_500K, MODE3_1M,
 ];
 
 #[panic_handler]
@@ -103,7 +98,7 @@ async fn main(_spawner: Spawner) -> ! {
     }
 }
 
-fn dump_profiles(bus: &mut dyn ImuBus) {
+fn dump_profiles(bus: &mut dyn ImuBus<Profile = SpiProfile>) {
     for profile in PROFILES {
         let _ = bus.apply_profile(TARGET, profile);
         bus.delay_ms(2);

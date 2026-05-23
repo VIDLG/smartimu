@@ -14,8 +14,8 @@ std = []
 [dependencies]
 cobs = { workspace = true, optional = true }
 crc32fast = { workspace = true, optional = true }
-heapless.workspace = true
 postcard = { workspace = true, optional = true }
 serde.workspace = true
 serde-json-core = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
+thiserror.workspace = true
