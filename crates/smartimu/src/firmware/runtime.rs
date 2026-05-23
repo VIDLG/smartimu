@@ -1,4 +1,5 @@
 use crate::bus::{ImuBus, ImuTargetId, SpiProfile};
+use crate::delay_ms;
 use crate::driver::ImuDriver;
 use crate::drivers::CandidateDriver;
 use crate::error::ImuError;
@@ -11,7 +12,7 @@ pub fn probe_first_matching(
     for candidate in candidates {
         for profile in candidate.profiles {
             bus.apply_profile(target, *profile)?;
-            bus.delay_ms(1);
+            delay_ms(1);
 
             match candidate.descriptor.driver.probe(bus, target) {
                 Ok(true) => return Ok(Some((candidate.descriptor.driver, *profile))),

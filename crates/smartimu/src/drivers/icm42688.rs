@@ -1,6 +1,6 @@
 use crate::{
-    DriverResources, ImuBus, ImuChip, ImuDriver, ImuError, ImuSampleConfig, ImuTargetId, RangeDps,
-    RangeG, RawSample, SampleRateHz, ScaleProfile, SpiProfile,
+    delay_ms, DriverResources, ImuBus, ImuChip, ImuDriver, ImuError, ImuSampleConfig,
+    ImuTargetId, RangeDps, RangeG, RawSample, SampleRateHz, ScaleProfile, SpiProfile,
 };
 
 const CHIP_ID: u8 = 0x05;
@@ -36,7 +36,7 @@ impl ImuDriver for Icm42688Driver {
             if id == CHIP_ID && revision == REVISION_ID {
                 return Ok(true);
             }
-            bus.delay_ms(5);
+            delay_ms(5);
         }
         Ok(false)
     }
@@ -58,7 +58,7 @@ impl ImuDriver for Icm42688Driver {
         bus.write_reg(target, REG_CTRL3, 0x76)?;
         bus.write_reg(target, REG_CTRL5, 0x00)?;
         bus.write_reg(target, REG_CTRL7, 0x03)?;
-        bus.delay_ms(20);
+        delay_ms(20);
         Ok(())
     }
 
@@ -68,7 +68,7 @@ impl ImuDriver for Icm42688Driver {
             if status & 0x03 == 0x03 {
                 return read_sample(bus, target);
             }
-            bus.delay_ms(1);
+            delay_ms(1);
         }
         read_sample(bus, target)
     }

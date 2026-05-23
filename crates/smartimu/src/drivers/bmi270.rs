@@ -1,6 +1,7 @@
 use crate::{
-    DriverResourceKey, DriverResources, ImuBus, ImuChip, ImuDriver, ImuError, ImuSampleConfig,
-    ImuTargetId, RangeDps, RangeG, RawSample, SampleRateHz, ScaleProfile, SpiProfile,
+    delay_ms, DriverResourceKey, DriverResources, ImuBus, ImuChip, ImuDriver, ImuError,
+    ImuSampleConfig, ImuTargetId, RangeDps, RangeG, RawSample, SampleRateHz, ScaleProfile,
+    SpiProfile,
 };
 
 const CHIP_ID: u8 = 0x24;
@@ -23,7 +24,7 @@ impl ImuDriver for Bmi270Driver {
         for _ in 0..3 {
             for dummy in [1usize, 0, 2] {
                 let _ = bus.read_reg(target, 0x00, dummy);
-                bus.delay_ms(2);
+                delay_ms(2);
                 if let Ok(id) = bus.read_reg(target, 0x00, dummy) {
                     if id == CHIP_ID {
                         return Ok(true);
@@ -32,7 +33,7 @@ impl ImuDriver for Bmi270Driver {
             }
 
             let _ = bus.write_reg(target, 0x7E, 0xB6);
-            bus.delay_ms(20);
+            delay_ms(20);
         }
 
         Ok(false)
@@ -40,7 +41,7 @@ impl ImuDriver for Bmi270Driver {
 
     fn reset(&self, bus: &mut dyn ImuBus<Profile = SpiProfile>, target: ImuTargetId) -> Result<(), ImuError> {
         bus.write_reg(target, 0x7E, 0xB6)?;
-        bus.delay_ms(10);
+        delay_ms(10);
         Ok(())
     }
 
@@ -57,14 +58,14 @@ impl ImuDriver for Bmi270Driver {
             .ok_or(ImuError::MissingResource)?;
 
         let _ = bus.read_reg(target, 0x00, 1);
-        bus.delay_ms(1);
+        delay_ms(1);
 
         let pwr_conf = bus.read_reg(target, 0x7C, 1)?;
         bus.write_reg(target, 0x7C, pwr_conf & !0x01)?;
-        bus.delay_ms(1);
+        delay_ms(1);
 
         bus.write_reg(target, 0x59, 0x00)?;
-        bus.delay_ms(1);
+        delay_ms(1);
 
         let mut index = 0;
         while index + BURST_CHUNK <= blob.len() {
@@ -83,7 +84,7 @@ impl ImuDriver for Bmi270Driver {
         }
 
         bus.write_reg(target, 0x59, 0x01)?;
-        bus.delay_ms(150);
+        delay_ms(150);
 
         let status = bus.read_reg(target, 0x21, 1)?;
         if status & 0x0F != 0x01 {
@@ -95,7 +96,7 @@ impl ImuDriver for Bmi270Driver {
         bus.write_reg(target, 0x42, 0xA9)?;
         bus.write_reg(target, 0x43, gyro_range_reg(config.gyro_range)?)?;
         bus.write_reg(target, 0x7D, 0x0E)?;
-        bus.delay_ms(50);
+        delay_ms(50);
         Ok(())
     }
 

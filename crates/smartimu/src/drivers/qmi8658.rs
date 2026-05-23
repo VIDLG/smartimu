@@ -1,6 +1,6 @@
 use crate::{
-    DriverResources, ImuBus, ImuChip, ImuDriver, ImuError, ImuSampleConfig, ImuTargetId, RangeDps,
-    RangeG, RawSample, SampleRateHz, ScaleProfile, SpiProfile,
+    delay_ms, DriverResources, ImuBus, ImuChip, ImuDriver, ImuError, ImuSampleConfig,
+    ImuTargetId, RangeDps, RangeG, RawSample, SampleRateHz, ScaleProfile, SpiProfile,
 };
 
 const CHIP_ID: u8 = 0x05;
@@ -37,14 +37,14 @@ impl ImuDriver for Qmi8658Driver {
             if id == CHIP_ID || (id == CHIP_ID_ALT && revision == CHIP_ID_ALT) {
                 return Ok(true);
             }
-            bus.delay_ms(5);
+            delay_ms(5);
         }
         Ok(false)
     }
 
     fn reset(&self, bus: &mut dyn ImuBus<Profile = SpiProfile>, target: ImuTargetId) -> Result<(), ImuError> {
         bus.write_reg(target, REG_RESET, 0xB0)?;
-        bus.delay_ms(20);
+        delay_ms(20);
         Ok(())
     }
 
@@ -61,7 +61,7 @@ impl ImuDriver for Qmi8658Driver {
         bus.write_reg(target, REG_CTRL3, 0x76)?;
         bus.write_reg(target, REG_CTRL5, 0x00)?;
         bus.write_reg(target, REG_CTRL7, 0x03)?;
-        bus.delay_ms(50);
+        delay_ms(50);
         Ok(())
     }
 
@@ -71,7 +71,7 @@ impl ImuDriver for Qmi8658Driver {
             if status & 0x03 == 0x03 {
                 return read_sample(bus, target);
             }
-            bus.delay_ms(1);
+            delay_ms(1);
         }
         read_sample(bus, target)
     }

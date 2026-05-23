@@ -1,6 +1,6 @@
 use crate::{
-    DriverResources, ImuBus, ImuChip, ImuDriver, ImuError, ImuSampleConfig, ImuTargetId, RangeDps,
-    RangeG, RawSample, SampleRateHz, ScaleProfile, SpiProfile,
+    delay_ms, DriverResources, ImuBus, ImuChip, ImuDriver, ImuError, ImuSampleConfig,
+    ImuTargetId, RangeDps, RangeG, RawSample, SampleRateHz, ScaleProfile, SpiProfile,
 };
 
 const CHIP_ID: u8 = 0x6A;
@@ -36,7 +36,7 @@ impl ImuDriver for Hxy42688Driver {
             if id == CHIP_ID && com_cfg == COM_CFG_DEFAULT {
                 return Ok(true);
             }
-            bus.delay_ms(5);
+            delay_ms(5);
         }
         Ok(false)
     }
@@ -54,12 +54,12 @@ impl ImuDriver for Hxy42688Driver {
     ) -> Result<(), ImuError> {
         super::ensure_supported_sample_config(self.supported_sample_configs(), config)?;
         bus.write_reg(target, REG_PWR_CTRL, 0x0E)?;
-        bus.delay_ms(10);
+        delay_ms(10);
         bus.write_reg(target, REG_ACC_CONF, 0xA8)?;
         bus.write_reg(target, REG_ACC_RANGE, accel_range_reg(config.accel_range)?)?;
         bus.write_reg(target, REG_GYR_CONF, 0xA9)?;
         bus.write_reg(target, REG_GYR_RANGE, gyro_range_reg(config.gyro_range)?)?;
-        bus.delay_ms(5);
+        delay_ms(5);
         Ok(())
     }
 

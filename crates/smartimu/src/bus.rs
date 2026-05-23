@@ -57,8 +57,6 @@ pub trait ImuBus {
         dummy_bytes: usize,
         data: &mut [u8],
     ) -> Result<(), ImuError>;
-    fn delay_ms(&mut self, ms: u64);
-
     fn write_reg(&mut self, target: ImuTargetId, reg: u8, value: u8) -> Result<(), ImuError> {
         self.write_regs(target, reg, &[value])
     }

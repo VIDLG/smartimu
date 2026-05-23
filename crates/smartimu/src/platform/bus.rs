@@ -9,6 +9,10 @@ use crate::{SpiMode, SpiProfile, ImuBus, ImuError, ImuTargetId};
 const MAX_WRITE_BYTES: usize = 40;
 const MAX_READ_BYTES: usize = 64;
 
+pub fn delay_ms(ms: u64) {
+    block_for(Duration::from_millis(ms));
+}
+
 pub struct EspImuBus<'a, 'd, const N: usize> {
     spi: &'a mut Spi<'d, Blocking>,
     targets: [ImuTargetId; N],
@@ -111,7 +115,4 @@ impl<const N: usize> ImuBus for EspImuBus<'_, '_, N> {
         Ok(())
     }
 
-    fn delay_ms(&mut self, ms: u64) {
-        block_for(Duration::from_millis(ms));
-    }
 }
