@@ -1,6 +1,6 @@
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
-use imu_core::{
+use crate::{
     BusDescriptor, ErrorFrame, HeartbeatFrame, HelloFrame, ImuChip, ImuDescriptor, ImuError, ImuId,
     MAX_MESSAGE_LEN, PROTOCOL_VERSION, ProbeResultFrame, RawSample, SampleFrame, TopologyFrame,
     WireFormat, WireFrame, WireHeader,
@@ -39,7 +39,7 @@ impl SessionRuntime {
     pub fn hello(&mut self, uptime_ms: u32, system_label: &str) -> WireFrame {
         WireFrame::Hello(HelloFrame {
             header: self.header(uptime_ms),
-            system_label: bounded_string(system_label, imu_core::MAX_LABEL_LEN),
+            system_label: bounded_string(system_label, crate::MAX_LABEL_LEN),
         })
     }
 
@@ -64,12 +64,12 @@ impl SessionRuntime {
         detected_chip: ImuChip,
         success: bool,
         error: Option<ImuError>,
-        profile: Option<imu_core::SpiProfile>,
+        profile: Option<crate::SpiProfile>,
     ) -> WireFrame {
         WireFrame::ProbeResult(ProbeResultFrame {
             header: self.header(uptime_ms),
             imu_id,
-            driver_name: bounded_string(driver_name, imu_core::MAX_LABEL_LEN),
+            driver_name: bounded_string(driver_name, crate::MAX_LABEL_LEN),
             detected_chip,
             success,
             error,

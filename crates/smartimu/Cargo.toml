@@ -1,5 +1,5 @@
 [package]
-name = "imu-core"
+name = "smartimu"
 edition.workspace = true
 rust-version.workspace = true
 version.workspace = true
@@ -10,6 +10,7 @@ binary = ["dep:cobs", "dep:crc32fast", "dep:postcard"]
 json = ["dep:serde-json-core"]
 std-json = ["std", "dep:serde_json"]
 std = []
+esp = ["dep:esp-hal", "dep:embassy-time", "dep:embedded-hal"]
 
 [dependencies]
 cobs = { workspace = true, optional = true }
@@ -19,3 +20,10 @@ serde.workspace = true
 serde-json-core = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 thiserror.workspace = true
+# ESP platform (optional)
+embassy-time = { workspace = true, optional = true }
+embedded-hal = { workspace = true, optional = true }
+esp-hal = { workspace = true, optional = true }
+
+[build-dependencies]
+cc.workspace = true

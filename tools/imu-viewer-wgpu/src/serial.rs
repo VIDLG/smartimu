@@ -3,7 +3,7 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
-use imu_core::{WireFrame, decode_binary_packet, decode_json};
+use smartimu::{WireFrame, decode_binary_packet, decode_json};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InputMode {

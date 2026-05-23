@@ -1,5 +1,7 @@
-use imu_core::{SpiProfile, ImuBus, ImuDriver, ImuError, ImuTargetId};
-use imu_drivers::CandidateDriver;
+use crate::bus::{ImuBus, ImuTargetId, SpiProfile};
+use crate::driver::ImuDriver;
+use crate::drivers::CandidateDriver;
+use crate::error::ImuError;
 
 pub fn probe_first_matching(
     bus: &mut dyn ImuBus<Profile = SpiProfile>,

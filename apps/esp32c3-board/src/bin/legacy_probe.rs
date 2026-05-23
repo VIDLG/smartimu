@@ -12,14 +12,14 @@ use esp_hal::spi::master::{Config, Spi};
 use esp_hal::time::Rate;
 use esp_hal::timer::timg::TimerGroup;
 use esp_println::println;
-use imu_core::{
+use smartimu::{
     BusId, SpiMode, SpiProfile, ImuBus, ImuChip, ImuDriver, ImuSampleConfig, ImuTargetId, RangeDps,
     RangeG, SampleRateHz,
 };
-use imu_drivers::{CandidateDriver, bmi270, hxy42688, icm42688, lsm6, qmi8658};
-use imu_firmware::runtime::probe_first_matching;
-use imu_platform_esp::bus::EspImuBus;
-use imu_platform_esp::resources::EspDriverResources;
+use smartimu::drivers::{CandidateDriver, bmi270, hxy42688, icm42688, lsm6, qmi8658};
+use smartimu::firmware::runtime::probe_first_matching;
+use smartimu::EspImuBus;
+use smartimu::EspDriverResources;
 
 const SPI_FREQ_KHZ: u32 = 1_000;
 const STREAM_INTERVAL_MS: u64 = 100;
@@ -335,7 +335,7 @@ async fn main(_spawner: Spawner) -> ! {
             match detected.driver.read_raw(&mut bus, runtime.config.target) {
                 Ok(raw) => {
                     runtime.sample_index = runtime.sample_index.wrapping_add(1);
-                    let scale = imu_core::scale_profile_for_config(
+                    let scale = smartimu::scale_profile_for_config(
                         detected.driver.chip(),
                         &detected.sample_config,
                     )

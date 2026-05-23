@@ -9,7 +9,7 @@ bytemuck.workspace = true
 egui.workspace = true
 egui-wgpu.workspace = true
 egui-winit.workspace = true
-imu-core = { path = "../../crates/imu-core", features = ["json", "std-json", "binary", "std"] }
+smartimu = { path = "../../crates/smartimu", features = ["json", "std-json", "binary", "std"] }
 pollster.workspace = true
 serialport.workspace = true
 wgpu.workspace = true

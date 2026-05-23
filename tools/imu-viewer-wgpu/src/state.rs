@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use imu_core::{ImuDescriptor, ImuId, OrientationFrame, SampleFrame, WireFrame};
+use smartimu::{ImuDescriptor, ImuId, OrientationFrame, SampleFrame, WireFrame};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ViewMode {
@@ -213,10 +213,10 @@ pub fn frame_uptime_ms(frame: &WireFrame) -> u32 {
 }
 
 pub fn nlerp_quaternion(
-    a: imu_core::Quaternion,
-    b: imu_core::Quaternion,
+    a: smartimu::Quaternion,
+    b: smartimu::Quaternion,
     t: f32,
-) -> imu_core::Quaternion {
+) -> smartimu::Quaternion {
     let mut b = b;
     let dot = a.w * b.w + a.x * b.x + a.y * b.y + a.z * b.z;
     if dot < 0.0 {
@@ -231,7 +231,7 @@ pub fn nlerp_quaternion(
     let y = one_minus_t * a.y + t * b.y;
     let z = one_minus_t * a.z + t * b.z;
     let norm = (w * w + x * x + y * y + z * z).sqrt().max(1e-6);
-    imu_core::Quaternion {
+    smartimu::Quaternion {
         w: w / norm,
         x: x / norm,
         y: y / norm,
@@ -239,7 +239,7 @@ pub fn nlerp_quaternion(
     }
 }
 
-fn quaternion_distance(a: imu_core::Quaternion, b: imu_core::Quaternion) -> f32 {
+fn quaternion_distance(a: smartimu::Quaternion, b: smartimu::Quaternion) -> f32 {
     let dw = a.w - b.w;
     let dx = a.x - b.x;
     let dy = a.y - b.y;
@@ -250,7 +250,7 @@ fn quaternion_distance(a: imu_core::Quaternion, b: imu_core::Quaternion) -> f32 
 fn synthesize_descriptor(sample: &SampleFrame) -> ImuDescriptor {
     ImuDescriptor {
         id: sample.imu_id,
-        bus_id: imu_core::BusId(0),
+        bus_id: smartimu::BusId(0),
         chip: sample.imu_chip,
         label: format!("imu-{}", sample.imu_id.sensor_id),
         sample_config: None,

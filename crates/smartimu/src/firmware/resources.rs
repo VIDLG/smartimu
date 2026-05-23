@@ -1,4 +1,4 @@
-use imu_core::{DriverResourceKey, DriverResources};
+use crate::{DriverResourceKey, DriverResources};
 
 pub struct EmptyResources;
 

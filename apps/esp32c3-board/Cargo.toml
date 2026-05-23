@@ -16,11 +16,7 @@ esp-bootloader-esp-idf = { workspace = true, features = ["esp32c3"] }
 esp-hal = { workspace = true, features = ["esp32c3"] }
 esp-println = { workspace = true, features = ["defmt-espflash", "uart", "esp32c3"] }
 esp-rtos = { workspace = true, features = ["esp32c3"] }
-imu-core = { path = "../../crates/imu-core", default-features = false, features = ["json", "binary"] }
-imu-drivers = { path = "../../crates/imu-drivers" }
-imu-fusion = { path = "../../crates/imu-fusion" }
-imu-firmware = { path = "../../crates/imu-firmware" }
-imu-platform-esp = { path = "../../crates/imu-platform-esp", features = ["esp32c3"] }
+smartimu = { path = "../../crates/smartimu", default-features = false, features = ["json", "binary", "esp"] }
 
 [[bin]]
 name = "esp32c3-board"

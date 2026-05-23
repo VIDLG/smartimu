@@ -9,7 +9,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use eframe::egui;
 use egui_plot::{Legend, Line, Plot, PlotPoints};
-use imu_core::{
+use smartimu::{
     ImuDescriptor, ImuId, OrientationFrame, SampleFrame, WireFrame, decode_binary_packet,
     decode_json, default_scale_profile_for_chip,
 };
@@ -319,7 +319,7 @@ impl eframe::App for ViewerApp {
                         .topology
                         .get(imu_id)
                         .and_then(|descriptor| descriptor.sample_config.as_ref())
-                        .and_then(|config| imu_core::scale_profile_for_config(sample.imu_chip, config))
+                        .and_then(|config| smartimu::scale_profile_for_config(sample.imu_chip, config))
                         .or_else(|| default_scale_profile_for_chip(sample.imu_chip))
                     {
                         let physical = sample.sample.to_physical(scale);
@@ -781,7 +781,7 @@ impl ViewerApp {
                     .entry(sample.imu_id)
                     .or_insert_with(|| ImuDescriptor {
                         id: sample.imu_id,
-                        bus_id: imu_core::BusId(0),
+                        bus_id: smartimu::BusId(0),
                         chip: sample.imu_chip,
                         label: format!("imu-{}", sample.imu_id.sensor_id),
                         sample_config: None,
@@ -792,7 +792,7 @@ impl ViewerApp {
                     .topology
                     .get(&sample.imu_id)
                     .and_then(|descriptor| descriptor.sample_config.as_ref())
-                    .and_then(|config| imu_core::scale_profile_for_config(sample.imu_chip, config))
+                    .and_then(|config| smartimu::scale_profile_for_config(sample.imu_chip, config))
                     .or_else(|| default_scale_profile_for_chip(sample.imu_chip))
                 {
                     let physical = sample.sample.to_physical(scale);

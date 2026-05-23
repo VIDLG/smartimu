@@ -1,4 +1,4 @@
-use imu_core::{DriverResourceKey, DriverResources};
+use crate::{DriverResourceKey, DriverResources};
 
 mod generated {
     include!(concat!(env!("OUT_DIR"), "/bmi270_config.rs"));

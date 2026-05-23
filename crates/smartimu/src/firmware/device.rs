@@ -1,7 +1,9 @@
 use alloc::string::String;
 use alloc::vec::Vec;
-use imu_core::{BusDescriptor, SpiProfile, ImuDescriptor, ImuTargetId};
-use imu_drivers::CandidateDriver;
+use crate::bus::{SpiProfile, ImuTargetId};
+use crate::drivers::CandidateDriver;
+use crate::protocol::BusDescriptor;
+use crate::types::ImuDescriptor;
 
 pub const MAX_DEVICE_IMUS: usize = 16;
 

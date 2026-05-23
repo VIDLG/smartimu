@@ -1,11 +1,12 @@
+use std::fs;
+use std::path::PathBuf;
+
 fn main() {
     generate_bmi270_config();
+    compile_fusion();
 }
 
 fn generate_bmi270_config() {
-    use std::fs;
-    use std::path::PathBuf;
-
     let manifest_dir =
         PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("missing manifest dir"));
     let workspace_dir = manifest_dir
@@ -47,4 +48,23 @@ fn generate_bmi270_config() {
         format!("pub const BMI270_CONFIG: &[u8] = &[{bytes}];\n"),
     )
     .expect("failed to write bmi270_config.rs");
+}
+
+fn compile_fusion() {
+    let manifest_dir =
+        PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("missing manifest dir"));
+    let workspace_dir = manifest_dir
+        .parent()
+        .and_then(|p| p.parent())
+        .expect("workspace root");
+    let fusion_dir = workspace_dir.join("contrib").join("fusion");
+
+    println!("cargo:rerun-if-changed={}", fusion_dir.display());
+
+    cc::Build::new()
+        .include(&fusion_dir)
+        .file(fusion_dir.join("FusionAhrs.c"))
+        .file(fusion_dir.join("FusionCompass.c"))
+        .file(fusion_dir.join("FusionOffset.c"))
+        .compile("fusion");
 }

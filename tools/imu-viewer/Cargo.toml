@@ -8,7 +8,7 @@ version.workspace = true
 eframe.workspace = true
 egui.workspace = true
 egui_plot.workspace = true
-imu-core = { path = "../../crates/imu-core", features = ["json", "std-json", "binary", "std"] }
+smartimu = { path = "../../crates/smartimu", features = ["json", "std-json", "binary", "std"] }
 serialport.workspace = true
 serde_json.workspace = true
 

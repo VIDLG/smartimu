@@ -3,7 +3,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use egui::{Context, RichText};
-use imu_core::ImuId;
+use smartimu::ImuId;
 
 use crate::serial::InputMode;
 use crate::state::{PlaybackState, ViewMode, ViewerState};

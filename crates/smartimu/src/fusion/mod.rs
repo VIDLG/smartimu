@@ -1,6 +1,4 @@
-#![no_std]
-
-use imu_core::Quaternion;
+use crate::Quaternion;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]

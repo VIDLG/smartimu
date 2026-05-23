@@ -1,9 +1,11 @@
-use imu_core::{
+use crate::{
     DriverResources, ImuBus, ImuChip, ImuDriver, ImuError, ImuSampleConfig, ImuTargetId, RangeDps,
     RangeG, RawSample, SampleRateHz, ScaleProfile, SpiProfile,
 };
 
 const CHIP_ID: u8 = 0x6A;
+const COM_CFG_DEFAULT: u8 = 0x50;
+
 const REG_WHO_AM_I: u8 = 0x01;
 const REG_COM_CFG: u8 = 0x05;
 const REG_DATA_STAT: u8 = 0x0B;
@@ -14,24 +16,24 @@ const REG_GYR_CONF: u8 = 0x42;
 const REG_GYR_RANGE: u8 = 0x43;
 const REG_PWR_CTRL: u8 = 0x7D;
 
-pub static DRIVER: Lsm6Driver = Lsm6Driver;
-pub static DESCRIPTOR: crate::DriverDescriptor = crate::DriverDescriptor {
-    name: "SC7I22",
+pub static DRIVER: Hxy42688Driver = Hxy42688Driver;
+pub static DESCRIPTOR: super::DriverDescriptor = super::DriverDescriptor {
+    name: "ICM-42688-HXY",
     driver: &DRIVER,
 };
 
-pub struct Lsm6Driver;
+pub struct Hxy42688Driver;
 
-impl ImuDriver for Lsm6Driver {
+impl ImuDriver for Hxy42688Driver {
     fn chip(&self) -> ImuChip {
-        ImuChip::Sc7u22
+        ImuChip::Icm42688Hxy
     }
 
     fn probe(&self, bus: &mut dyn ImuBus<Profile = SpiProfile>, target: ImuTargetId) -> Result<bool, ImuError> {
         for _ in 0..3 {
             let id = bus.read_reg(target, REG_WHO_AM_I, 0)?;
             let com_cfg = bus.read_reg(target, REG_COM_CFG, 0)?;
-            if id == CHIP_ID && com_cfg != 0x50 {
+            if id == CHIP_ID && com_cfg == COM_CFG_DEFAULT {
                 return Ok(true);
             }
             bus.delay_ms(5);
@@ -50,12 +52,12 @@ impl ImuDriver for Lsm6Driver {
         config: &ImuSampleConfig,
         _resources: &dyn DriverResources,
     ) -> Result<(), ImuError> {
-        crate::ensure_supported_sample_config(self.supported_sample_configs(), config)?;
+        super::ensure_supported_sample_config(self.supported_sample_configs(), config)?;
         bus.write_reg(target, REG_PWR_CTRL, 0x0E)?;
         bus.delay_ms(10);
         bus.write_reg(target, REG_ACC_CONF, 0xA8)?;
         bus.write_reg(target, REG_ACC_RANGE, accel_range_reg(config.accel_range)?)?;
-        bus.write_reg(target, REG_GYR_CONF, 0xA8)?;
+        bus.write_reg(target, REG_GYR_CONF, 0xA9)?;
         bus.write_reg(target, REG_GYR_RANGE, gyro_range_reg(config.gyro_range)?)?;
         bus.delay_ms(5);
         Ok(())
@@ -87,7 +89,7 @@ impl ImuDriver for Lsm6Driver {
     fn scale_profile(&self) -> ScaleProfile {
         ScaleProfile {
             accel_g_per_lsb: 1.0 / 4096.0,
-            gyro_dps_per_lsb: 500.0 / 32768.0,
+            gyro_dps_per_lsb: 1.0 / 16.4,
             temp_c_per_lsb: None,
             temp_offset_c: 0.0,
         }
@@ -96,7 +98,7 @@ impl ImuDriver for Lsm6Driver {
     fn supported_sample_configs(&self) -> alloc::vec::Vec<ImuSampleConfig> {
         supported_sample_configs(
             &[RangeG(4), RangeG(8), RangeG(16)],
-            &[RangeDps(250), RangeDps(500), RangeDps(1000)],
+            &[RangeDps(250), RangeDps(500), RangeDps(1000), RangeDps(2000)],
             &[SampleRateHz(100)],
         )
     }
@@ -113,6 +115,7 @@ fn accel_range_reg(range: RangeG) -> Result<u8, ImuError> {
 
 fn gyro_range_reg(range: RangeDps) -> Result<u8, ImuError> {
     match range {
+        RangeDps(2000) => Ok(0x00),
         RangeDps(1000) => Ok(0x01),
         RangeDps(500) => Ok(0x02),
         RangeDps(250) => Ok(0x03),

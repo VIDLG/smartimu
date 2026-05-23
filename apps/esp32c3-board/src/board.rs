@@ -1,5 +1,5 @@
-use imu_core::{BusId, SpiMode, SpiProfile, ImuChip, ImuId, ImuTargetId};
-use imu_drivers::{CandidateDriver, bmi270, hxy42688, icm42688, lsm6, qmi8658};
+use smartimu::{BusId, SpiMode, SpiProfile, ImuChip, ImuId, ImuTargetId};
+use smartimu::drivers::{CandidateDriver, bmi270, hxy42688, icm42688, lsm6, qmi8658};
 
 #[allow(dead_code)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

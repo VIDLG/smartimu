@@ -1,10 +1,6 @@
 [workspace]
 members = [
-  "crates/imu-core",
-  "crates/imu-drivers",
-  "crates/imu-fusion",
-  "crates/imu-firmware",
-  "crates/imu-platform-esp",
+  "crates/smartimu",
   "apps/esp32c3-board",
   "tools/serial-open-check",
   "tools/imu-viewer",

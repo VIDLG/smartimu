@@ -19,15 +19,15 @@ use esp_hal::time::Rate;
 use esp_hal::timer::timg::TimerGroup;
 use esp_hal::usb_serial_jtag::UsbSerialJtag;
 use esp_println::println;
-use imu_core::{
+use smartimu::{
     BusDescriptor, ImuBus, ImuChip, ImuDescriptor, ImuDriver, ImuSampleConfig, OrientationFrame,
     RangeDps, RangeG, SampleRateHz, SpiProfile, WireFormat, encode_binary_packet, encode_json,
 };
-use imu_firmware::runtime::probe_first_matching;
-use imu_firmware::transport::{SessionRuntime, bounded_string};
-use imu_fusion::{FusionFilter, FusionFilterSettings};
-use imu_platform_esp::bus::EspImuBus;
-use imu_platform_esp::resources::EspDriverResources;
+use smartimu::firmware::runtime::probe_first_matching;
+use smartimu::firmware::transport::{SessionRuntime, bounded_string};
+use smartimu::fusion::{FusionFilter, FusionFilterSettings};
+use smartimu::EspImuBus;
+use smartimu::EspDriverResources;
 
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
@@ -82,7 +82,7 @@ impl<'d> Transport<'d> {
         }
     }
 
-    fn emit_frame(&mut self, frame: &imu_core::WireFrame) {
+    fn emit_frame(&mut self, frame: &smartimu::WireFrame) {
         match self.mode {
             board::TransportMode::Json => match encode_json::<768>(frame) {
                 Ok(line) => {
@@ -199,7 +199,7 @@ async fn main(_spawner: Spawner) -> ! {
                             transport.emit_frame(&session.error(
                                 uptime_ms(boot),
                                 Some(runtime.config.imu_id),
-                                imu_core::ImuError::ChipNotFound,
+                                smartimu::ImuError::ChipNotFound,
                                 "detected chip mismatches expected chip",
                             ));
                         }
@@ -230,7 +230,7 @@ async fn main(_spawner: Spawner) -> ! {
                 transport.emit_frame(&session.error(
                     uptime_ms(boot),
                     Some(runtime.config.imu_id),
-                    imu_core::ImuError::ChipNotFound,
+                    smartimu::ImuError::ChipNotFound,
                     &probe_snapshot(&mut bus, runtime.config.target, runtime.config.expected),
                 ));
             }
@@ -283,7 +283,7 @@ async fn main(_spawner: Spawner) -> ! {
                         0x0001,
                     ));
 
-                    if let Some(scale) = imu_core::scale_profile_for_config(
+                    if let Some(scale) = smartimu::scale_profile_for_config(
                         detected.driver.chip(),
                         &detected.sample_config,
                     ) {
@@ -307,7 +307,7 @@ async fn main(_spawner: Spawner) -> ! {
                             };
                             runtime.last_orientation_timestamp_us = Some(timestamp_us);
                             let quaternion = fusion.update_imu(accel_ms2, gyro_rads, dt_s);
-                            transport.emit_frame(&imu_core::WireFrame::Orientation(
+                            transport.emit_frame(&smartimu::WireFrame::Orientation(
                                 OrientationFrame {
                                     header: session.header(uptime_ms(boot)),
                                     imu_id: runtime.config.imu_id,
@@ -354,7 +354,7 @@ fn bus_descriptors() -> Vec<BusDescriptor> {
     let mut buses = Vec::new();
     buses.push(BusDescriptor {
         bus_id: board::BUS_ID,
-        label: bounded_string("spi2", imu_core::MAX_LABEL_LEN),
+        label: bounded_string("spi2", smartimu::MAX_LABEL_LEN),
     });
     buses
 }
@@ -376,7 +376,7 @@ fn imu_descriptors(runtimes: &[ImuRuntime; 5]) -> Vec<ImuDescriptor> {
             id: runtime.config.imu_id,
             bus_id: board::BUS_ID,
             chip,
-            label: bounded_string(runtime.config.label, imu_core::MAX_LABEL_LEN),
+            label: bounded_string(runtime.config.label, smartimu::MAX_LABEL_LEN),
             sample_config,
             supported_sample_configs,
         };
@@ -403,7 +403,7 @@ fn select_imu_sample_config(driver: &dyn ImuDriver) -> ImuSampleConfig {
 
 fn probe_snapshot(
     bus: &mut dyn ImuBus<Profile = SpiProfile>,
-    target: imu_core::ImuTargetId,
+    target: smartimu::ImuTargetId,
     expected: ImuChip,
 ) -> String {
     if expected == ImuChip::Bmi270 {
@@ -431,7 +431,7 @@ fn probe_snapshot(
     out
 }
 
-fn bmi270_probe_snapshot(bus: &mut dyn ImuBus<Profile = SpiProfile>, target: imu_core::ImuTargetId) -> String {
+fn bmi270_probe_snapshot(bus: &mut dyn ImuBus<Profile = SpiProfile>, target: smartimu::ImuTargetId) -> String {
     let _ = bus.apply_profile(target, board::PROFILE_MODE0_100K);
     let r00_m0_d0 = bus.read_reg(target, 0x00, 0).ok().unwrap_or(0xFF);
     let r00_m0_d1 = bus.read_reg(target, 0x00, 1).ok().unwrap_or(0xFF);

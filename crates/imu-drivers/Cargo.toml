@@ -1,8 +1,0 @@
-[package]
-name = "imu-drivers"
-edition.workspace = true
-rust-version.workspace = true
-version.workspace = true
-
-[dependencies]
-imu-core = { path = "../imu-core", default-features = false }

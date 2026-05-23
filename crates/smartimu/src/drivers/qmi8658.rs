@@ -1,10 +1,10 @@
-use imu_core::{
+use crate::{
     DriverResources, ImuBus, ImuChip, ImuDriver, ImuError, ImuSampleConfig, ImuTargetId, RangeDps,
     RangeG, RawSample, SampleRateHz, ScaleProfile, SpiProfile,
 };
 
 const CHIP_ID: u8 = 0x05;
-const REVISION_ID: u8 = 0x7C;
+const CHIP_ID_ALT: u8 = 0x3E;
 
 const REG_WHO_AM_I: u8 = 0x00;
 const REG_REVISION_ID: u8 = 0x01;
@@ -15,25 +15,26 @@ const REG_CTRL5: u8 = 0x06;
 const REG_CTRL7: u8 = 0x08;
 const REG_STATUS0: u8 = 0x2E;
 const REG_AX_L: u8 = 0x35;
+const REG_RESET: u8 = 0x60;
 
-pub static DRIVER: Icm42688Driver = Icm42688Driver;
-pub static DESCRIPTOR: crate::DriverDescriptor = crate::DriverDescriptor {
-    name: "ICM-42688-PC",
+pub static DRIVER: Qmi8658Driver = Qmi8658Driver;
+pub static DESCRIPTOR: super::DriverDescriptor = super::DriverDescriptor {
+    name: "QMI8658A",
     driver: &DRIVER,
 };
 
-pub struct Icm42688Driver;
+pub struct Qmi8658Driver;
 
-impl ImuDriver for Icm42688Driver {
+impl ImuDriver for Qmi8658Driver {
     fn chip(&self) -> ImuChip {
-        ImuChip::Icm42688Pc
+        ImuChip::Qmi8658A
     }
 
     fn probe(&self, bus: &mut dyn ImuBus<Profile = SpiProfile>, target: ImuTargetId) -> Result<bool, ImuError> {
         for _ in 0..3 {
             let id = bus.read_reg(target, REG_WHO_AM_I, 0)?;
             let revision = bus.read_reg(target, REG_REVISION_ID, 0)?;
-            if id == CHIP_ID && revision == REVISION_ID {
+            if id == CHIP_ID || (id == CHIP_ID_ALT && revision == CHIP_ID_ALT) {
                 return Ok(true);
             }
             bus.delay_ms(5);
@@ -41,7 +42,9 @@ impl ImuDriver for Icm42688Driver {
         Ok(false)
     }
 
-    fn reset(&self, _bus: &mut dyn ImuBus<Profile = SpiProfile>, _target: ImuTargetId) -> Result<(), ImuError> {
+    fn reset(&self, bus: &mut dyn ImuBus<Profile = SpiProfile>, target: ImuTargetId) -> Result<(), ImuError> {
+        bus.write_reg(target, REG_RESET, 0xB0)?;
+        bus.delay_ms(20);
         Ok(())
     }
 
@@ -52,13 +55,13 @@ impl ImuDriver for Icm42688Driver {
         config: &ImuSampleConfig,
         _resources: &dyn DriverResources,
     ) -> Result<(), ImuError> {
-        crate::ensure_supported_sample_config(self.supported_sample_configs(), config)?;
+        super::ensure_supported_sample_config(self.supported_sample_configs(), config)?;
         bus.write_reg(target, REG_CTRL1, 0x20)?;
         bus.write_reg(target, REG_CTRL2, 0x06)?;
         bus.write_reg(target, REG_CTRL3, 0x76)?;
         bus.write_reg(target, REG_CTRL5, 0x00)?;
         bus.write_reg(target, REG_CTRL7, 0x03)?;
-        bus.delay_ms(20);
+        bus.delay_ms(50);
         Ok(())
     }
 

@@ -1,4 +1,4 @@
-use imu_core::{
+use crate::{
     DriverResourceKey, DriverResources, ImuBus, ImuChip, ImuDriver, ImuError, ImuSampleConfig,
     ImuTargetId, RangeDps, RangeG, RawSample, SampleRateHz, ScaleProfile, SpiProfile,
 };
@@ -7,7 +7,7 @@ const CHIP_ID: u8 = 0x24;
 const BURST_CHUNK: usize = 32;
 
 pub static DRIVER: Bmi270Driver = Bmi270Driver;
-pub static DESCRIPTOR: crate::DriverDescriptor = crate::DriverDescriptor {
+pub static DESCRIPTOR: super::DriverDescriptor = super::DriverDescriptor {
     name: "BMI270",
     driver: &DRIVER,
 };
@@ -51,7 +51,7 @@ impl ImuDriver for Bmi270Driver {
         config: &ImuSampleConfig,
         resources: &dyn DriverResources,
     ) -> Result<(), ImuError> {
-        crate::ensure_supported_sample_config(self.supported_sample_configs(), config)?;
+        super::ensure_supported_sample_config(self.supported_sample_configs(), config)?;
         let blob = resources
             .bytes(DriverResourceKey::Bmi270ConfigBlob)
             .ok_or(ImuError::MissingResource)?;

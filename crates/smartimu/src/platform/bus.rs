@@ -4,7 +4,7 @@ use esp_hal::Blocking;
 use esp_hal::gpio::Output;
 use esp_hal::spi::master::{Config, Spi};
 use esp_hal::time::Rate;
-use imu_core::{SpiMode, SpiProfile, ImuBus, ImuError, ImuTargetId};
+use crate::{SpiMode, SpiProfile, ImuBus, ImuError, ImuTargetId};
 
 const MAX_WRITE_BYTES: usize = 40;
 const MAX_READ_BYTES: usize = 64;
@@ -34,9 +34,11 @@ impl<'a, 'd, const N: usize> EspImuBus<'a, 'd, N> {
             .position(|candidate| *candidate == target)
             .ok_or(ImuError::InvalidTarget)
     }
+}
 
-    fn mode(profile: SpiProfile) -> esp_hal::spi::Mode {
-        match profile.mode {
+impl From<SpiMode> for esp_hal::spi::Mode {
+    fn from(mode: SpiMode) -> Self {
+        match mode {
             SpiMode::Mode0 => esp_hal::spi::Mode::_0,
             SpiMode::Mode1 => esp_hal::spi::Mode::_1,
             SpiMode::Mode2 => esp_hal::spi::Mode::_2,
@@ -53,7 +55,7 @@ impl<const N: usize> ImuBus for EspImuBus<'_, '_, N> {
             .apply_config(
                 &Config::default()
                     .with_frequency(Rate::from_khz(profile.frequency_khz))
-                    .with_mode(Self::mode(profile)),
+                    .with_mode(profile.mode.into()),
             )
             .map_err(|_| ImuError::ConfigError)
     }

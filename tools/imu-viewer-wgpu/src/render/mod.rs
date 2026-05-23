@@ -1,5 +1,5 @@
 use bytemuck::{Pod, Zeroable};
-use imu_core::{ImuId, Quaternion};
+use smartimu::{ImuId, Quaternion};
 use wgpu::{
     BindGroup, Buffer, Color, CommandEncoder, Device, FragmentState, MultisampleState,
     PipelineCompilationOptions, PrimitiveState, PrimitiveTopology, Queue,

@@ -1715,11 +1715,7 @@ dependencies = [
  "esp-hal",
  "esp-println",
  "esp-rtos",
- "imu-core",
- "imu-drivers",
- "imu-firmware",
- "imu-fusion",
- "imu-platform-esp",
+ "smartimu",
 ]
 
 [[package]]
@@ -2357,64 +2353,15 @@ dependencies = [
 ]
 
 [[package]]
-name = "imu-core"
-version = "0.1.0"
-dependencies = [
- "cobs",
- "crc32fast",
- "postcard",
- "serde",
- "serde-json-core",
- "serde_json",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "imu-drivers"
-version = "0.1.0"
-dependencies = [
- "imu-core",
-]
-
-[[package]]
-name = "imu-firmware"
-version = "0.1.0"
-dependencies = [
- "imu-core",
- "imu-drivers",
-]
-
-[[package]]
-name = "imu-fusion"
-version = "0.1.0"
-dependencies = [
- "cc",
- "imu-core",
-]
-
-[[package]]
-name = "imu-platform-esp"
-version = "0.1.0"
-dependencies = [
- "embassy-time",
- "embedded-hal 1.0.0",
- "esp-bootloader-esp-idf",
- "esp-hal",
- "esp-println",
- "esp-rtos",
- "imu-core",
-]
-
-[[package]]
 name = "imu-viewer"
 version = "0.1.0"
 dependencies = [
  "eframe",
  "egui",
  "egui_plot",
- "imu-core",
  "serde_json",
  "serialport",
+ "smartimu",
 ]
 
 [[package]]
@@ -2425,9 +2372,9 @@ dependencies = [
  "egui",
  "egui-wgpu",
  "egui-winit",
- "imu-core",
  "pollster",
  "serialport",
+ "smartimu",
  "wgpu",
  "windows-sys 0.60.2",
  "winit",
@@ -3906,6 +3853,23 @@ name = "smallvec"
 version = "1.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
+
+[[package]]
+name = "smartimu"
+version = "0.1.0"
+dependencies = [
+ "cc",
+ "cobs",
+ "crc32fast",
+ "embassy-time",
+ "embedded-hal 1.0.0",
+ "esp-hal",
+ "postcard",
+ "serde",
+ "serde-json-core",
+ "serde_json",
+ "thiserror 2.0.18",
+]
 
 [[package]]
 name = "smithay-client-toolkit"

@@ -2,7 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use imu_core::{WireFrame, decode_json};
+use smartimu::{WireFrame, decode_json};
 
 use crate::state::frame_uptime_ms;
 

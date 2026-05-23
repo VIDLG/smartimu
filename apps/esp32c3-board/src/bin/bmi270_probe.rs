@@ -12,8 +12,8 @@ use esp_hal::spi::master::{Config, Spi};
 use esp_hal::time::Rate;
 use esp_hal::timer::timg::TimerGroup;
 use esp_println::println;
-use imu_core::{BusId, SpiMode, SpiProfile, ImuBus, ImuTargetId};
-use imu_platform_esp::bus::EspImuBus;
+use smartimu::{BusId, SpiMode, SpiProfile, ImuBus, ImuTargetId};
+use smartimu::EspImuBus;
 
 const BUS_ID: BusId = BusId(0);
 const TARGET: ImuTargetId = ImuTargetId {
