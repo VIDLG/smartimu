@@ -2,27 +2,27 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use smartimu::{WireFrame, decode_json};
+use smartimu::{DeviceFrame, WireFrame, decode_json};
 
-use crate::state::frame_uptime_ms;
+use crate::state::frame_emit_timestamp_us;
 
 #[derive(Clone, Copy, Debug)]
 pub struct ReplayClock {
-    pub first_uptime_ms: u32,
+    pub first_emit_timestamp_us: u64,
     pub base_instant: Instant,
 }
 
 impl ReplayClock {
-    pub fn new(frame: &WireFrame) -> Self {
+    pub fn new(frame: &DeviceFrame) -> Self {
         Self {
-            first_uptime_ms: frame_uptime_ms(frame),
+            first_emit_timestamp_us: frame_emit_timestamp_us(frame),
             base_instant: Instant::now(),
         }
     }
 
-    pub fn due(&self, frame: &WireFrame) -> bool {
-        let elapsed_ms = self.base_instant.elapsed().as_millis() as u32;
-        frame_uptime_ms(frame).saturating_sub(self.first_uptime_ms) <= elapsed_ms
+    pub fn due(&self, frame: &DeviceFrame) -> bool {
+        let elapsed_us = self.base_instant.elapsed().as_micros() as u64;
+        frame_emit_timestamp_us(frame).saturating_sub(self.first_emit_timestamp_us) <= elapsed_us
     }
 }
 
@@ -43,7 +43,7 @@ pub fn find_default_replay_path() -> Option<PathBuf> {
     candidates.pop().map(|(_, path)| path)
 }
 
-pub fn load_replay_frames(path: &Path) -> Result<Vec<WireFrame>, String> {
+pub fn load_replay_frames(path: &Path) -> Result<Vec<DeviceFrame>, String> {
     let content = fs::read_to_string(path).map_err(|error| error.to_string())?;
     let mut frames = Vec::new();
     for (line_index, line) in content.lines().enumerate() {
@@ -51,10 +51,17 @@ pub fn load_replay_frames(path: &Path) -> Result<Vec<WireFrame>, String> {
         if trimmed.is_empty() {
             continue;
         }
-        match decode_json(trimmed) {
-            Ok(frame) => frames.push(frame),
-            Err(error) => return Err(format!("line {}: {}", line_index + 1, error)),
+        match decode_json(trimmed).ok().and_then(wire_to_device) {
+            Some(frame) => frames.push(frame),
+            None => return Err(format!("line {}: invalid device frame", line_index + 1)),
         }
     }
     Ok(frames)
+}
+
+fn wire_to_device(frame: WireFrame) -> Option<DeviceFrame> {
+    match frame {
+        WireFrame::Device(frame) => Some(frame),
+        WireFrame::Host(_) => None,
+    }
 }

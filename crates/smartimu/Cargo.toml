@@ -5,23 +5,24 @@ rust-version.workspace = true
 version.workspace = true
 
 [features]
-default = ["binary"]
-binary = ["dep:cobs", "dep:crc32fast", "dep:postcard"]
+default = []
 json = ["dep:serde-json-core"]
 std-json = ["std", "dep:serde_json"]
 std = []
-esp = ["dep:esp-hal", "dep:embassy-time", "dep:embedded-hal"]
+esp = ["dep:esp-hal", "dep:embedded-hal"]
 
 [dependencies]
-cobs = { workspace = true, optional = true }
-crc32fast = { workspace = true, optional = true }
-postcard = { workspace = true, optional = true }
+async-trait.workspace = true
+cobs.workspace = true
+crc32fast.workspace = true
+postcard.workspace = true
 serde.workspace = true
 serde-json-core = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 thiserror.workspace = true
+embassy-time.workspace = true
+hashbrown.workspace = true
 # ESP platform (optional)
-embassy-time = { workspace = true, optional = true }
 embedded-hal = { workspace = true, optional = true }
 esp-hal = { workspace = true, optional = true }
 

@@ -3,7 +3,7 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
-use smartimu::{WireFrame, decode_binary_packet, decode_json};
+use smartimu::{DeviceFrame, WireFrame, decode_binary_packet, decode_json};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InputMode {
@@ -23,7 +23,7 @@ impl InputMode {
 }
 
 pub enum SerialEvent {
-    Frame(WireFrame),
+    Frame(DeviceFrame),
     Status(String),
     RawLine(String),
 }
@@ -271,7 +271,7 @@ fn spawn_powershell_serial_reader(
                 )));
                 continue;
             }
-            if let Ok(frame) = decode_json(trimmed) {
+            if let Some(frame) = decode_json(trimmed).ok().and_then(wire_to_device) {
                 let _ = tx.send(SerialEvent::Status(String::from(
                     "json stream (powershell)",
                 )));
@@ -331,17 +331,28 @@ fn normalize_serial_port_name(port_name: &str) -> String {
     port_name.to_string()
 }
 
-fn parse_json_line(buffer: &[u8]) -> Option<WireFrame> {
+fn parse_json_line(buffer: &[u8]) -> Option<DeviceFrame> {
     let line = std::str::from_utf8(buffer).ok()?.trim();
     if line.is_empty() {
         return None;
     }
     let json_start = line.find('{')?;
-    decode_json(line[json_start..].trim()).ok()
+    decode_json(line[json_start..].trim())
+        .ok()
+        .and_then(wire_to_device)
 }
 
-fn parse_binary_packet(buffer: &[u8]) -> Option<WireFrame> {
-    decode_binary_packet::<1024>(buffer).ok()
+fn parse_binary_packet(buffer: &[u8]) -> Option<DeviceFrame> {
+    decode_binary_packet::<1024>(buffer)
+        .ok()
+        .and_then(wire_to_device)
+}
+
+fn wire_to_device(frame: WireFrame) -> Option<DeviceFrame> {
+    match frame {
+        WireFrame::Device(frame) => Some(frame),
+        WireFrame::Host(_) => None,
+    }
 }
 
 fn raw_text_line(buffer: &[u8]) -> Option<String> {

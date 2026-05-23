@@ -144,9 +144,9 @@ pub fn show(ctx: &Context, state: &mut ViewerState, status: UiStatus<'_>) -> UiA
             ui.add_space(6.0);
             for imu_id in state.sorted_imu_ids() {
                 let label = state
-                    .topology
+                    .imu_infos
                     .get(&imu_id)
-                    .map(|descriptor| descriptor.label.to_string())
+                    .and_then(|info| info.label.clone())
                     .unwrap_or_else(|| format!("imu-{}", imu_id.sensor_id));
                 let selected = state.selected_imu == Some(imu_id);
                 if ui
@@ -159,8 +159,8 @@ pub fn show(ctx: &Context, state: &mut ViewerState, status: UiStatus<'_>) -> UiA
                     state.selected_imu = Some(imu_id);
                     action = UiAction::SelectImu;
                 }
-                if let Some(descriptor) = state.topology.get(&imu_id) {
-                    ui.small(format!("{:?}", descriptor.chip));
+                if let Some(info) = state.imu_infos.get(&imu_id) {
+                    ui.small(format!("{:?}", info.chip_profile.chip));
                 }
                 ui.add_space(3.0);
             }
@@ -259,8 +259,8 @@ fn selected_imu_details(ui: &mut egui::Ui, state: &ViewerState, imu_id: ImuId) {
     }
     if let Some(sample) = state.latest_samples.get(&imu_id) {
         ui.separator();
-        ui.label(format!("accel: {:?}", sample.sample.accel));
-        ui.label(format!("gyro: {:?}", sample.sample.gyro));
+        ui.label(format!("accel: {:?}", sample.sample.imu6.accel));
+        ui.label(format!("gyro: {:?}", sample.sample.imu6.gyro));
     }
 }
 

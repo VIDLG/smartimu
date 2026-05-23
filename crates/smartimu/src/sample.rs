@@ -1,88 +1,110 @@
-use crate::types::{ImuChip, ImuSampleConfig};
+use crate::types::{ImuSampleConfig, TemperatureScale};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RawSample {
+pub struct RawImu6 {
     pub accel: [i16; 3],
     pub gyro: [i16; 3],
-    pub temp: Option<i16>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RawTemperature {
+    pub raw: i16,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SensorTimestamp {
+    pub ticks: u32,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RawImuSample {
+    pub imu6: RawImu6,
+    pub temperature: Option<RawTemperature>,
+    pub sensor_timestamp: Option<SensorTimestamp>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SampleReadoutRequest {
+    pub temperature: bool,
+    pub sensor_timestamp: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct PhysicalSample {
+pub struct PhysicalImu6 {
     pub accel_g: [f32; 3],
     pub gyro_dps: [f32; 3],
-    pub temp_c: Option<f32>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct ScaleProfile {
-    pub accel_g_per_lsb: f32,
-    pub gyro_dps_per_lsb: f32,
-    pub temp_c_per_lsb: Option<f32>,
-    pub temp_offset_c: f32,
+pub struct PhysicalTemperature {
+    pub celsius: f32,
 }
 
-impl RawSample {
-    pub fn to_physical(self, scale: ScaleProfile) -> PhysicalSample {
-        PhysicalSample {
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct PhysicalImuSample {
+    pub imu6: PhysicalImu6,
+    pub temperature: Option<PhysicalTemperature>,
+    pub sensor_timestamp: Option<SensorTimestamp>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Imu6Scale {
+    pub accel_g_per_lsb: f32,
+    pub gyro_dps_per_lsb: f32,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ImuSampleScale {
+    pub imu6: Imu6Scale,
+    pub temperature: Option<TemperatureScale>,
+}
+
+impl RawImu6 {
+    pub fn to_physical(self, scale: Imu6Scale) -> PhysicalImu6 {
+        PhysicalImu6 {
             accel_g: self.accel.map(|value| value as f32 * scale.accel_g_per_lsb),
             gyro_dps: self.gyro.map(|value| value as f32 * scale.gyro_dps_per_lsb),
-            temp_c: match (self.temp, scale.temp_c_per_lsb) {
-                (Some(raw), Some(factor)) => Some(raw as f32 * factor + scale.temp_offset_c),
-                _ => None,
-            },
         }
     }
 }
 
-pub fn default_scale_profile_for_chip(chip: ImuChip) -> Option<ScaleProfile> {
-    let profile = match chip {
-        ImuChip::Unknown => return None,
-        ImuChip::Icm42688Hxy => ScaleProfile {
-            accel_g_per_lsb: 1.0 / 4096.0,
-            gyro_dps_per_lsb: 1.0 / 16.4,
-            temp_c_per_lsb: None,
-            temp_offset_c: 0.0,
-        },
-        ImuChip::Icm42688Pc => ScaleProfile {
-            accel_g_per_lsb: 1.0 / 16384.0,
-            gyro_dps_per_lsb: 1.0 / 16.0,
-            temp_c_per_lsb: None,
-            temp_offset_c: 0.0,
-        },
-        ImuChip::Bmi270 => ScaleProfile {
-            accel_g_per_lsb: 1.0 / 2048.0,
-            gyro_dps_per_lsb: 1.0 / 16.4,
-            temp_c_per_lsb: None,
-            temp_offset_c: 0.0,
-        },
-        ImuChip::Qmi8658A => ScaleProfile {
-            accel_g_per_lsb: 1.0 / 16384.0,
-            gyro_dps_per_lsb: 1.0 / 16.0,
-            temp_c_per_lsb: None,
-            temp_offset_c: 0.0,
-        },
-        ImuChip::Sc7u22 => ScaleProfile {
-            accel_g_per_lsb: 1.0 / 4096.0,
-            gyro_dps_per_lsb: 500.0 / 32768.0,
-            temp_c_per_lsb: None,
-            temp_offset_c: 0.0,
-        },
-    };
-
-    Some(profile)
+impl From<RawImu6> for RawImuSample {
+    fn from(imu6: RawImu6) -> Self {
+        Self {
+            imu6,
+            temperature: None,
+            sensor_timestamp: None,
+        }
+    }
 }
 
-pub fn scale_profile_for_config(chip: ImuChip, config: &ImuSampleConfig) -> Option<ScaleProfile> {
-    if chip == ImuChip::Unknown {
-        return None;
+impl RawTemperature {
+    pub fn to_physical(self, scale: TemperatureScale) -> PhysicalTemperature {
+        PhysicalTemperature {
+            celsius: self.raw as f32 * scale.c_per_lsb + scale.offset_c,
+        }
     }
+}
 
-    Some(ScaleProfile {
-        accel_g_per_lsb: config.accel_range.0 as f32 / 32768.0,
-        gyro_dps_per_lsb: config.gyro_range.0 as f32 / 32768.0,
-        temp_c_per_lsb: None,
-        temp_offset_c: 0.0,
-    })
+impl RawImuSample {
+    pub fn to_physical(self, scale: ImuSampleScale) -> PhysicalImuSample {
+        PhysicalImuSample {
+            imu6: self.imu6.to_physical(scale.imu6),
+            temperature: match (self.temperature, scale.temperature) {
+                (Some(temperature), Some(scale)) => Some(temperature.to_physical(scale)),
+                _ => None,
+            },
+            sensor_timestamp: self.sensor_timestamp,
+        }
+    }
+}
+
+impl From<ImuSampleConfig> for Imu6Scale {
+    fn from(config: ImuSampleConfig) -> Self {
+        Self {
+            accel_g_per_lsb: config.accel_range.0 as f32 / 32768.0,
+            gyro_dps_per_lsb: config.gyro_range.0 as f32 / 32768.0,
+        }
+    }
 }

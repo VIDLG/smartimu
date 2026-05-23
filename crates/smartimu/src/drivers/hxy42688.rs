@@ -1,10 +1,15 @@
 use crate::{
-    delay_ms, DriverResources, ImuBus, ImuChip, ImuDriver, ImuError, ImuSampleConfig,
-    ImuTargetId, RangeDps, RangeG, RawSample, SampleRateHz, ScaleProfile, SpiProfile,
+    DataReadyCondition, DataReadyStatus, DriverInfo, ImuBus, ImuChip, ImuChipProfile, ImuDriver,
+    ImuSampleConfig, ImuTargetId, ProbeRegisterMatch, ProbeRegisterReadout, RangeDps, RangeG,
+    SampleByteOrder, SampleRateHz, SampleRegisterReadout, SmartImuError, SpiProfile, delay_ms,
 };
+use async_trait::async_trait;
 
 const CHIP_ID: u8 = 0x6A;
 const COM_CFG_DEFAULT: u8 = 0x50;
+const PROBE_RETRY_DELAY_MS: u64 = 5;
+const SENSOR_POWER_UP_DELAY_MS: u64 = 10;
+const CONFIG_SETTLE_DELAY_MS: u64 = 5;
 
 const REG_WHO_AM_I: u8 = 0x01;
 const REG_COM_CFG: u8 = 0x05;
@@ -16,129 +21,106 @@ const REG_GYR_CONF: u8 = 0x42;
 const REG_GYR_RANGE: u8 = 0x43;
 const REG_PWR_CTRL: u8 = 0x7D;
 
+const ACCEL_RANGES: &[RangeG] = &[RangeG(4), RangeG(8), RangeG(16)];
+const GYRO_RANGES: &[RangeDps] = &[RangeDps(250), RangeDps(500), RangeDps(1000), RangeDps(2000)];
+const SAMPLE_RATES: &[SampleRateHz] = &[SampleRateHz(100)];
+const PROBE_MATCHES: &[ProbeRegisterMatch] = &[ProbeRegisterMatch::WhoAmIAndRevision {
+    who_am_i: CHIP_ID,
+    revision: COM_CFG_DEFAULT,
+}];
+
+pub static CHIP_PROFILE: ImuChipProfile = ImuChipProfile {
+    ..super::six_axis_chip_profile(
+        ImuChip::Icm42688Hxy,
+        ACCEL_RANGES,
+        GYRO_RANGES,
+        SAMPLE_RATES,
+    )
+};
+
 pub static DRIVER: Hxy42688Driver = Hxy42688Driver;
-pub static DESCRIPTOR: super::DriverDescriptor = super::DriverDescriptor {
+pub static INFO: crate::DriverInfo = crate::DriverInfo {
     name: "ICM-42688-HXY",
     driver: &DRIVER,
+    chip_profile: &CHIP_PROFILE,
+    probe: ProbeRegisterReadout {
+        who_am_i_register: REG_WHO_AM_I,
+        revision_register: Some(REG_COM_CFG),
+        matches: PROBE_MATCHES,
+        attempts: 3,
+        retry_delay_ms: PROBE_RETRY_DELAY_MS,
+    },
+    sample_readout: SampleRegisterReadout {
+        data_start_register: REG_ACC_XH,
+        byte_order: SampleByteOrder::BigEndian,
+        status: Some(DataReadyStatus {
+            register: REG_DATA_STAT,
+            mask: 0x03,
+            condition: DataReadyCondition::AnySet,
+        }),
+        poll_attempts: 0,
+        poll_delay_ms: 0,
+        read_on_timeout: false,
+    },
 };
 
 pub struct Hxy42688Driver;
 
+#[async_trait(?Send)]
 impl ImuDriver for Hxy42688Driver {
-    fn chip(&self) -> ImuChip {
-        ImuChip::Icm42688Hxy
+    fn info(&self) -> &'static DriverInfo {
+        &INFO
     }
 
-    fn probe(&self, bus: &mut dyn ImuBus<Profile = SpiProfile>, target: ImuTargetId) -> Result<bool, ImuError> {
-        for _ in 0..3 {
-            let id = bus.read_reg(target, REG_WHO_AM_I, 0)?;
-            let com_cfg = bus.read_reg(target, REG_COM_CFG, 0)?;
-            if id == CHIP_ID && com_cfg == COM_CFG_DEFAULT {
-                return Ok(true);
-            }
-            delay_ms(5);
-        }
-        Ok(false)
-    }
-
-    fn reset(&self, _bus: &mut dyn ImuBus<Profile = SpiProfile>, _target: ImuTargetId) -> Result<(), ImuError> {
-        Ok(())
-    }
-
-    fn configure(
+    async fn configure(
         &self,
-        bus: &mut dyn ImuBus<Profile = SpiProfile>,
+        bus: &mut dyn ImuBus,
         target: ImuTargetId,
         config: &ImuSampleConfig,
-        _resources: &dyn DriverResources,
-    ) -> Result<(), ImuError> {
-        super::ensure_supported_sample_config(self.supported_sample_configs(), config)?;
+    ) -> Result<(), SmartImuError> {
+        crate::ensure_sample_config_supported(&INFO.chip_profile.sample_config_options, config)?;
+
+        // Enable accel/gyro before touching their range and filter registers.
         bus.write_reg(target, REG_PWR_CTRL, 0x0E)?;
-        delay_ms(10);
+        delay_ms(SENSOR_POWER_UP_DELAY_MS).await;
+
+        // Program accel ODR/filter preset, then apply the requested full-scale range.
         bus.write_reg(target, REG_ACC_CONF, 0xA8)?;
-        bus.write_reg(target, REG_ACC_RANGE, accel_range_reg(config.accel_range)?)?;
+        bus.write_reg(
+            target,
+            REG_ACC_RANGE,
+            match config.accel_range {
+                RangeG(4) => 0x01,
+                RangeG(8) => 0x02,
+                RangeG(16) => 0x03,
+                _ => {
+                    return Err(SmartImuError::UnsupportedConfig(
+                        crate::UnsupportedConfigReason::AccelRange,
+                    ));
+                }
+            },
+        )?;
+
+        // Program gyro ODR/filter preset, then apply the requested full-scale range.
         bus.write_reg(target, REG_GYR_CONF, 0xA9)?;
-        bus.write_reg(target, REG_GYR_RANGE, gyro_range_reg(config.gyro_range)?)?;
-        delay_ms(5);
+        bus.write_reg(
+            target,
+            REG_GYR_RANGE,
+            match config.gyro_range {
+                RangeDps(2000) => 0x00,
+                RangeDps(1000) => 0x01,
+                RangeDps(500) => 0x02,
+                RangeDps(250) => 0x03,
+                _ => {
+                    return Err(SmartImuError::UnsupportedConfig(
+                        crate::UnsupportedConfigReason::GyroRange,
+                    ));
+                }
+            },
+        )?;
+
+        // Give the output pipeline a short settle window before the first sample read.
+        delay_ms(CONFIG_SETTLE_DELAY_MS).await;
         Ok(())
     }
-
-    fn read_raw(&self, bus: &mut dyn ImuBus<Profile = SpiProfile>, target: ImuTargetId) -> Result<RawSample, ImuError> {
-        let status = bus.read_reg(target, REG_DATA_STAT, 0)?;
-        if status & 0x03 == 0 {
-            return Err(ImuError::DataNotReady);
-        }
-
-        let mut buf = [0u8; 12];
-        bus.read_regs(target, REG_ACC_XH, 0, &mut buf)?;
-        Ok(RawSample {
-            accel: [
-                i16::from_be_bytes([buf[0], buf[1]]),
-                i16::from_be_bytes([buf[2], buf[3]]),
-                i16::from_be_bytes([buf[4], buf[5]]),
-            ],
-            gyro: [
-                i16::from_be_bytes([buf[6], buf[7]]),
-                i16::from_be_bytes([buf[8], buf[9]]),
-                i16::from_be_bytes([buf[10], buf[11]]),
-            ],
-            temp: None,
-        })
-    }
-
-    fn scale_profile(&self) -> ScaleProfile {
-        ScaleProfile {
-            accel_g_per_lsb: 1.0 / 4096.0,
-            gyro_dps_per_lsb: 1.0 / 16.4,
-            temp_c_per_lsb: None,
-            temp_offset_c: 0.0,
-        }
-    }
-
-    fn supported_sample_configs(&self) -> alloc::vec::Vec<ImuSampleConfig> {
-        supported_sample_configs(
-            &[RangeG(4), RangeG(8), RangeG(16)],
-            &[RangeDps(250), RangeDps(500), RangeDps(1000), RangeDps(2000)],
-            &[SampleRateHz(100)],
-        )
-    }
-}
-
-fn accel_range_reg(range: RangeG) -> Result<u8, ImuError> {
-    match range {
-        RangeG(4) => Ok(0x01),
-        RangeG(8) => Ok(0x02),
-        RangeG(16) => Ok(0x03),
-        _ => Err(ImuError::UnsupportedConfig),
-    }
-}
-
-fn gyro_range_reg(range: RangeDps) -> Result<u8, ImuError> {
-    match range {
-        RangeDps(2000) => Ok(0x00),
-        RangeDps(1000) => Ok(0x01),
-        RangeDps(500) => Ok(0x02),
-        RangeDps(250) => Ok(0x03),
-        _ => Err(ImuError::UnsupportedConfig),
-    }
-}
-
-fn supported_sample_configs(
-    accel_ranges: &[RangeG],
-    gyro_ranges: &[RangeDps],
-    sample_rates: &[SampleRateHz],
-) -> alloc::vec::Vec<ImuSampleConfig> {
-    let mut configs = alloc::vec::Vec::new();
-    for accel_range in accel_ranges {
-        for gyro_range in gyro_ranges {
-            for sample_rate_hz in sample_rates {
-                configs.push(ImuSampleConfig {
-                    accel_range: *accel_range,
-                    gyro_range: *gyro_range,
-                    sample_rate_hz: *sample_rate_hz,
-                });
-            }
-        }
-    }
-    configs
 }

@@ -1,5 +1,5 @@
-use smartimu::{BusId, SpiMode, SpiProfile, ImuChip, ImuId, ImuTargetId};
-use smartimu::drivers::{CandidateDriver, bmi270, hxy42688, icm42688, lsm6, qmi8658};
+use smartimu::drivers::{hxy42688, icm42688, lsm6, qmi8658};
+use smartimu::{BusId, CandidateDriver, ImuChip, ImuId, ImuTargetId, SpiMode, SpiProfile};
 
 #[allow(dead_code)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -22,27 +22,12 @@ pub const PROFILE_MODE0: SpiProfile = SpiProfile::new(0, SpiMode::Mode0, SPI_FRE
 pub const PROFILE_MODE1: SpiProfile = SpiProfile::new(1, SpiMode::Mode1, SPI_FREQ_KHZ);
 pub const PROFILE_MODE2: SpiProfile = SpiProfile::new(2, SpiMode::Mode2, SPI_FREQ_KHZ);
 pub const PROFILE_MODE3: SpiProfile = SpiProfile::new(3, SpiMode::Mode3, SPI_FREQ_KHZ);
-pub const PROFILE_MODE0_500K: SpiProfile = SpiProfile::new(4, SpiMode::Mode0, 500);
-pub const PROFILE_MODE3_500K: SpiProfile = SpiProfile::new(5, SpiMode::Mode3, 500);
-pub const PROFILE_MODE0_100K: SpiProfile = SpiProfile::new(6, SpiMode::Mode0, 100);
-pub const PROFILE_MODE3_100K: SpiProfile = SpiProfile::new(7, SpiMode::Mode3, 100);
-pub const SLOT3_OPTIONAL: bool = true;
 
 pub const PROFILES_MODE0: [SpiProfile; 1] = [PROFILE_MODE0];
 pub const PROFILES_MODE3: [SpiProfile; 1] = [PROFILE_MODE3];
 pub const PROFILES_MODE0_3: [SpiProfile; 2] = [PROFILE_MODE0, PROFILE_MODE3];
 pub const PROFILES_ALL: [SpiProfile; 4] =
     [PROFILE_MODE0, PROFILE_MODE1, PROFILE_MODE2, PROFILE_MODE3];
-pub const PROFILES_BMI: [SpiProfile; 8] = [
-    PROFILE_MODE3,
-    PROFILE_MODE0,
-    PROFILE_MODE1,
-    PROFILE_MODE2,
-    PROFILE_MODE3_500K,
-    PROFILE_MODE0_500K,
-    PROFILE_MODE3_100K,
-    PROFILE_MODE0_100K,
-];
 
 #[derive(Clone, Copy)]
 pub struct BoardImuConfig {
@@ -55,75 +40,66 @@ pub struct BoardImuConfig {
 
 pub static SLOT1_CANDIDATES: [CandidateDriver; 4] = [
     CandidateDriver {
-        descriptor: &hxy42688::DESCRIPTOR,
+        info: &hxy42688::INFO,
         profiles: &PROFILES_MODE0_3,
     },
     CandidateDriver {
-        descriptor: &lsm6::DESCRIPTOR,
+        info: &lsm6::INFO,
         profiles: &PROFILES_MODE3,
     },
     CandidateDriver {
-        descriptor: &icm42688::DESCRIPTOR,
+        info: &icm42688::INFO,
         profiles: &PROFILES_MODE0,
     },
     CandidateDriver {
-        descriptor: &qmi8658::DESCRIPTOR,
+        info: &qmi8658::INFO,
         profiles: &PROFILES_MODE0,
     },
 ];
 
 pub static SLOT2_CANDIDATES: [CandidateDriver; 3] = [
     CandidateDriver {
-        descriptor: &icm42688::DESCRIPTOR,
+        info: &icm42688::INFO,
         profiles: &PROFILES_ALL,
     },
     CandidateDriver {
-        descriptor: &qmi8658::DESCRIPTOR,
+        info: &qmi8658::INFO,
         profiles: &PROFILES_ALL,
     },
     CandidateDriver {
-        descriptor: &lsm6::DESCRIPTOR,
+        info: &lsm6::INFO,
         profiles: &PROFILES_MODE3,
     },
 ];
 
-pub static SLOT3_CANDIDATES: [CandidateDriver; 2] = [
-    CandidateDriver {
-        descriptor: &bmi270::DESCRIPTOR,
-        profiles: &PROFILES_BMI,
-    },
-    CandidateDriver {
-        descriptor: &bmi270::DESCRIPTOR,
-        profiles: &PROFILES_MODE0,
-    },
-];
+pub static SLOT3_CANDIDATES: [CandidateDriver; 0] = [];
 
 pub static SLOT4_CANDIDATES: [CandidateDriver; 2] = [
     CandidateDriver {
-        descriptor: &qmi8658::DESCRIPTOR,
+        info: &qmi8658::INFO,
         profiles: &PROFILES_MODE0,
     },
     CandidateDriver {
-        descriptor: &icm42688::DESCRIPTOR,
+        info: &icm42688::INFO,
         profiles: &PROFILES_MODE0,
     },
 ];
 
 pub static SLOT5_CANDIDATES: [CandidateDriver; 4] = [
     CandidateDriver {
-        descriptor: &lsm6::DESCRIPTOR,
+        info: &lsm6::INFO,
         profiles: &PROFILES_MODE0_3,
     },
     CandidateDriver {
-        descriptor: &hxy42688::DESCRIPTOR,
+        info: &hxy42688::INFO,
         profiles: &PROFILES_MODE0_3,
     },
     CandidateDriver {
-        descriptor: &qmi8658::DESCRIPTOR,
+        info: &qmi8658::INFO,
         profiles: &PROFILES_MODE0_3,
     },
     CandidateDriver {
-        descriptor: &icm42688::DESCRIPTOR,
+        info: &icm42688::INFO,
         profiles: &PROFILES_MODE0,
     },
 ];
@@ -165,7 +141,7 @@ pub static BOARD_IMUS: [BoardImuConfig; 5] = [
             target_index: 2,
         },
         label: "slot-3",
-        expected: ImuChip::Bmi270,
+        expected: ImuChip::Icm42688Pc,
         candidates: &SLOT3_CANDIDATES,
     },
     BoardImuConfig {

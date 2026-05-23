@@ -16,7 +16,7 @@ esp-bootloader-esp-idf = { workspace = true, features = ["esp32c3"] }
 esp-hal = { workspace = true, features = ["esp32c3"] }
 esp-println = { workspace = true, features = ["defmt-espflash", "uart", "esp32c3"] }
 esp-rtos = { workspace = true, features = ["esp32c3"] }
-smartimu = { path = "../../crates/smartimu", default-features = false, features = ["json", "binary", "esp"] }
+smartimu = { path = "../../crates/smartimu", default-features = false, features = ["json", "esp"] }
 
 [[bin]]
 name = "esp32c3-board"

@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::error::ImuError;
+use crate::error::SmartImuError;
 use crate::types::BusId;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -11,6 +11,14 @@ pub struct ImuTargetId {
     /// Board-defined target slot on that bus, such as a chip-select index.
     pub target_index: u8,
 }
+
+/// SPI read turnaround cycles :how many dummy bytes to transmit between
+/// the register address and the data phase.
+///
+/// `Turnaround(0)` = data starts immediately after the address byte.
+/// `Turnaround(1)` = one dummy byte before reading the response.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Turnaround(pub u8);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 /// SPI clock mode used when talking to a target.
@@ -42,22 +50,23 @@ impl SpiProfile {
     }
 }
 
-pub trait ImuBus {
-    type Profile;
-    fn apply_profile(
+pub trait ImuBus<Profile = SpiProfile> {
+    fn apply_profile(&mut self, target: ImuTargetId, profile: Profile)
+    -> Result<(), SmartImuError>;
+    fn write_regs(
         &mut self,
         target: ImuTargetId,
-        profile: Self::Profile,
-    ) -> Result<(), ImuError>;
-    fn write_regs(&mut self, target: ImuTargetId, reg: u8, data: &[u8]) -> Result<(), ImuError>;
+        reg: u8,
+        data: &[u8],
+    ) -> Result<(), SmartImuError>;
     fn read_regs(
         &mut self,
         target: ImuTargetId,
         reg: u8,
-        dummy_bytes: usize,
+        turnaround: Turnaround,
         data: &mut [u8],
-    ) -> Result<(), ImuError>;
-    fn write_reg(&mut self, target: ImuTargetId, reg: u8, value: u8) -> Result<(), ImuError> {
+    ) -> Result<(), SmartImuError>;
+    fn write_reg(&mut self, target: ImuTargetId, reg: u8, value: u8) -> Result<(), SmartImuError> {
         self.write_regs(target, reg, &[value])
     }
 
@@ -65,10 +74,10 @@ pub trait ImuBus {
         &mut self,
         target: ImuTargetId,
         reg: u8,
-        dummy_bytes: usize,
-    ) -> Result<u8, ImuError> {
+        turnaround: Turnaround,
+    ) -> Result<u8, SmartImuError> {
         let mut data = [0u8; 1];
-        self.read_regs(target, reg, dummy_bytes, &mut data)?;
+        self.read_regs(target, reg, turnaround, &mut data)?;
         Ok(data[0])
     }
 }

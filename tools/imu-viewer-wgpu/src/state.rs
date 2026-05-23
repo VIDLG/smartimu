@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 
-use smartimu::{ImuDescriptor, ImuId, OrientationFrame, SampleFrame, WireFrame};
+use smartimu::{
+    DeviceFrame, ImuId, ImuInfo, ImuSampleConfig, OrientationFrame, RangeDps, RangeG,
+    SampleConfigOptions, SampleFrame, SampleRateHz,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ViewMode {
@@ -35,12 +38,12 @@ pub struct IntegratedOrientation {
     pub roll: f32,
     pub pitch: f32,
     pub yaw: f32,
-    pub last_timestamp_us: Option<u64>,
+    pub last_sample_timestamp_us: Option<u64>,
 }
 
 #[derive(Clone, Debug)]
 pub struct ViewerState {
-    pub topology: HashMap<ImuId, ImuDescriptor>,
+    pub imu_infos: HashMap<ImuId, ImuInfo>,
     pub latest_samples: HashMap<ImuId, SampleFrame>,
     pub latest_orientation: HashMap<ImuId, OrientationFrame>,
     pub interpolated_orientation: HashMap<ImuId, OrientationFrame>,
@@ -56,7 +59,7 @@ pub struct ViewerState {
 impl Default for ViewerState {
     fn default() -> Self {
         Self {
-            topology: HashMap::new(),
+            imu_infos: HashMap::new(),
             latest_samples: HashMap::new(),
             latest_orientation: HashMap::new(),
             interpolated_orientation: HashMap::new(),
@@ -84,7 +87,7 @@ impl ViewerState {
     }
 
     pub fn sorted_imu_ids(&self) -> Vec<ImuId> {
-        let mut ids: Vec<ImuId> = self.topology.keys().copied().collect();
+        let mut ids: Vec<ImuId> = self.imu_infos.keys().copied().collect();
         if ids.is_empty() {
             ids.extend(self.latest_samples.keys().copied());
             ids.extend(self.latest_orientation.keys().copied());
@@ -118,32 +121,38 @@ impl ViewerState {
         self.selected_imu = None;
     }
 
-    pub fn handle_frame(&mut self, frame: WireFrame) {
+    pub fn handle_frame(&mut self, frame: DeviceFrame) {
         self.received_frames = self.received_frames.wrapping_add(1);
         match frame {
-            WireFrame::Hello(frame) => self.update_seq(frame.header.seq),
-            WireFrame::Topology(frame) => {
+            DeviceFrame::Ping(frame) => self.update_seq(frame.header.seq),
+            DeviceFrame::Inventory(frame) => {
                 self.update_seq(frame.header.seq);
-                self.topology.clear();
-                for descriptor in frame.imus {
-                    self.topology.insert(descriptor.id, descriptor);
+                self.imu_infos.clear();
+                for info in frame.imus {
+                    self.imu_infos.insert(info.id, info);
                 }
             }
-            WireFrame::ProbeResult(frame) => self.update_seq(frame.header.seq),
-            WireFrame::Sample(frame) => {
+            DeviceFrame::ImuInfo(frame) => {
+                self.update_seq(frame.header.seq);
+                if let Some(info) = frame.info {
+                    self.imu_infos.insert(info.id, info);
+                }
+            }
+            DeviceFrame::ProbeResult(frame) => self.update_seq(frame.header.seq),
+            DeviceFrame::Sample(frame) => {
                 self.update_seq(frame.header.seq);
                 self.update_integrated_orientation(&frame);
-                self.topology
+                self.imu_infos
                     .entry(frame.imu_id)
-                    .or_insert_with(|| synthesize_descriptor(&frame));
+                    .or_insert_with(|| synthesize_info(&frame));
                 self.latest_samples.insert(frame.imu_id, frame);
             }
-            WireFrame::Orientation(frame) => {
+            DeviceFrame::Orientation(frame) => {
                 self.update_seq(frame.header.seq);
                 self.latest_orientation.insert(frame.imu_id, frame);
             }
-            WireFrame::Error(frame) => self.update_seq(frame.header.seq),
-            WireFrame::Heartbeat(frame) => {
+            DeviceFrame::Error(frame) => self.update_seq(frame.header.seq),
+            DeviceFrame::Heartbeat(frame) => {
                 self.update_seq(frame.header.seq);
                 self.active_imus = frame.active_imus;
             }
@@ -164,7 +173,7 @@ impl ViewerState {
                 imu_id: current.imu_id,
                 imu_chip: current.imu_chip,
                 sample_index: current.sample_index,
-                timestamp_us: current.timestamp_us,
+                sample_timestamp_us: current.sample_timestamp_us,
                 quaternion: nlerp_quaternion(entry.quaternion, current.quaternion, 0.35),
             };
             changed |= quaternion_distance(before, entry.quaternion) > 0.000_001;
@@ -188,27 +197,28 @@ impl ViewerState {
             .integrated_orientation
             .entry(sample.imu_id)
             .or_default();
-        let dt = if let Some(last) = state.last_timestamp_us {
-            ((sample.timestamp_us.saturating_sub(last)) as f32 / 1_000_000.0).clamp(0.0, 0.1)
+        let dt = if let Some(last) = state.last_sample_timestamp_us {
+            ((sample.sample_timestamp_us.saturating_sub(last)) as f32 / 1_000_000.0).clamp(0.0, 0.1)
         } else {
             0.0
         };
-        state.last_timestamp_us = Some(sample.timestamp_us);
-        state.roll += (sample.sample.gyro[0] as f32 * GYRO_DPS_PER_LSB).to_radians() * dt;
-        state.pitch += (sample.sample.gyro[1] as f32 * GYRO_DPS_PER_LSB).to_radians() * dt;
-        state.yaw += (sample.sample.gyro[2] as f32 * GYRO_DPS_PER_LSB).to_radians() * dt;
+        state.last_sample_timestamp_us = Some(sample.sample_timestamp_us);
+        state.roll += (sample.sample.imu6.gyro[0] as f32 * GYRO_DPS_PER_LSB).to_radians() * dt;
+        state.pitch += (sample.sample.imu6.gyro[1] as f32 * GYRO_DPS_PER_LSB).to_radians() * dt;
+        state.yaw += (sample.sample.imu6.gyro[2] as f32 * GYRO_DPS_PER_LSB).to_radians() * dt;
     }
 }
 
-pub fn frame_uptime_ms(frame: &WireFrame) -> u32 {
+pub fn frame_emit_timestamp_us(frame: &DeviceFrame) -> u64 {
     match frame {
-        WireFrame::Hello(frame) => frame.header.uptime_ms,
-        WireFrame::Topology(frame) => frame.header.uptime_ms,
-        WireFrame::ProbeResult(frame) => frame.header.uptime_ms,
-        WireFrame::Sample(frame) => frame.header.uptime_ms,
-        WireFrame::Orientation(frame) => frame.header.uptime_ms,
-        WireFrame::Error(frame) => frame.header.uptime_ms,
-        WireFrame::Heartbeat(frame) => frame.header.uptime_ms,
+        DeviceFrame::Ping(frame) => frame.header.emit_timestamp_us,
+        DeviceFrame::Inventory(frame) => frame.header.emit_timestamp_us,
+        DeviceFrame::ImuInfo(frame) => frame.header.emit_timestamp_us,
+        DeviceFrame::ProbeResult(frame) => frame.header.emit_timestamp_us,
+        DeviceFrame::Sample(frame) => frame.header.emit_timestamp_us,
+        DeviceFrame::Orientation(frame) => frame.header.emit_timestamp_us,
+        DeviceFrame::Error(frame) => frame.header.emit_timestamp_us,
+        DeviceFrame::Heartbeat(frame) => frame.header.emit_timestamp_us,
     }
 }
 
@@ -247,13 +257,35 @@ fn quaternion_distance(a: smartimu::Quaternion, b: smartimu::Quaternion) -> f32 
     dw * dw + dx * dx + dy * dy + dz * dz
 }
 
-fn synthesize_descriptor(sample: &SampleFrame) -> ImuDescriptor {
-    ImuDescriptor {
+fn synthesize_info(sample: &SampleFrame) -> ImuInfo {
+    ImuInfo {
         id: sample.imu_id,
         bus_id: smartimu::BusId(0),
-        chip: sample.imu_chip,
-        label: format!("imu-{}", sample.imu_id.sensor_id),
-        sample_config: None,
-        supported_sample_configs: Vec::new(),
+        chip_profile: fallback_chip_profile(sample.imu_chip),
+        label: None,
+        sample_config: fallback_sample_config(),
+    }
+}
+
+fn fallback_sample_config() -> ImuSampleConfig {
+    ImuSampleConfig {
+        accel_range: RangeG(2),
+        gyro_range: RangeDps(2048),
+        sample_rate_hz: SampleRateHz(100),
+    }
+}
+
+fn fallback_sample_config_options() -> SampleConfigOptions {
+    SampleConfigOptions::Constrained {
+        configs: std::borrow::Cow::Owned(vec![fallback_sample_config()]),
+    }
+}
+
+fn fallback_chip_profile(chip: smartimu::ImuChip) -> smartimu::ImuChipProfile {
+    smartimu::ImuChipProfile {
+        chip,
+        sample_config_options: fallback_sample_config_options(),
+        sample_readout_support: smartimu::SampleReadoutSupport::default(),
+        temperature_config: None,
     }
 }

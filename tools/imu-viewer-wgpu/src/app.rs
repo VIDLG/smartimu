@@ -210,7 +210,7 @@ struct App {
     egui_state: Option<EguiWinitState>,
     state: ViewerState,
     playback_state: PlaybackState,
-    replay_frames: Vec<smartimu::WireFrame>,
+    replay_frames: Vec<smartimu::DeviceFrame>,
     replay_cursor: usize,
     replay_clock: Option<ReplayClock>,
     replay_path: Option<PathBuf>,

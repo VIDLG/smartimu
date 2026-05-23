@@ -1,11 +1,12 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
 use crate::bus::SpiProfile;
-use crate::error::ImuError;
-use crate::sample::RawSample;
-use crate::types::{BusId, ImuChip, ImuDescriptor, ImuId, Quaternion};
+use crate::error::SmartImuError;
+use crate::sample::{RawImuSample, SampleReadoutRequest};
+use crate::types::{BusInfo, ImuChip, ImuId, ImuInfo, Quaternion, SystemInfo};
 
 pub const PROTOCOL_VERSION: u8 = 1;
 pub const MAX_IMUS_PER_SYSTEM: usize = 16;
@@ -13,13 +14,19 @@ pub const MAX_BUSES_PER_SYSTEM: usize = 8;
 pub const MAX_LABEL_LEN: usize = 32;
 pub const MAX_MESSAGE_LEN: usize = 96;
 
-#[cfg(feature = "binary")]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub type BinaryCodecResult<T> = Result<T, BinaryCodecError>;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Error)]
 pub enum BinaryCodecError {
+    #[error("binary codec buffer too small")]
     BufferTooSmall,
+    #[error("postcard serialization error")]
     Postcard,
+    #[error("COBS decode error")]
     CobsDecode,
+    #[error("CRC mismatch")]
     CrcMismatch,
+    #[error("truncated binary packet")]
     Truncated,
 }
 
@@ -30,84 +37,147 @@ pub enum WireFormat {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct WireHeader {
+pub struct DeviceHeader {
     pub protocol_version: u8,
     pub format: WireFormat,
+    /// Identifies which physical board is sending this frame.
+    /// Allows a host to distinguish data from multiple boards.
     pub system_id: u16,
+    /// Distinguishes different run sessions on the same board (increments on reboot).
     pub session_id: u32,
+    /// Monotonically increasing sequence number for ordering and loss detection.
     pub seq: u32,
-    pub uptime_ms: u32,
+    /// Device-side timestamp captured when this frame is emitted.
+    pub emit_timestamp_us: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HostHeader {
+    pub protocol_version: u8,
+    pub seq: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct BusDescriptor {
-    pub bus_id: BusId,
-    pub label: String,
+pub struct PingRequestFrame {
+    pub header: HostHeader,
+    pub message: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct HelloFrame {
-    pub header: WireHeader,
-    pub system_label: String,
+pub struct GetInventoryRequestFrame {
+    pub header: HostHeader,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TopologyFrame {
-    pub header: WireHeader,
-    pub buses: Vec<BusDescriptor>,
-    pub imus: Vec<ImuDescriptor>,
+pub struct GetImuInfoRequestFrame {
+    pub header: HostHeader,
+    pub imu_id: ImuId,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StartSamplingRequestFrame {
+    pub header: HostHeader,
+    pub imu_id: Option<ImuId>,
+    pub sample_request: SampleReadoutRequest,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StopSamplingRequestFrame {
+    pub header: HostHeader,
+    pub imu_id: Option<ImuId>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PingFrame {
+    pub header: DeviceHeader,
+    pub message: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct InventoryFrame {
+    pub header: DeviceHeader,
+    pub system: SystemInfo,
+    pub buses: Vec<BusInfo>,
+    pub imus: Vec<ImuInfo>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ImuInfoFrame {
+    pub header: DeviceHeader,
+    pub imu_id: ImuId,
+    pub info: Option<ImuInfo>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProbeResultFrame {
-    pub header: WireHeader,
+    pub header: DeviceHeader,
     pub imu_id: ImuId,
-    pub driver_name: String,
-    pub detected_chip: ImuChip,
-    pub success: bool,
-    pub error: Option<ImuError>,
-    pub profile: Option<SpiProfile>,
+    pub probe_label: String,
+    pub result: ProbeResult,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ProbeResult {
+    Detected {
+        driver_id: String,
+        chip: ImuChip,
+        profile: SpiProfile,
+    },
+    NotDetected,
+    Failed {
+        error: SmartImuError,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SampleFrame {
-    pub header: WireHeader,
+    pub header: DeviceHeader,
     pub imu_id: ImuId,
     pub imu_chip: ImuChip,
     pub sample_index: u32,
-    pub timestamp_us: u64,
-    pub sample: RawSample,
+    pub sample_timestamp_us: u64,
+    pub sample: RawImuSample,
     pub status_bits: u16,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct OrientationFrame {
-    pub header: WireHeader,
+    pub header: DeviceHeader,
     pub imu_id: ImuId,
     pub imu_chip: ImuChip,
     pub sample_index: u32,
-    pub timestamp_us: u64,
+    pub sample_timestamp_us: u64,
     pub quaternion: Quaternion,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ErrorFrame {
-    pub header: WireHeader,
+    pub header: DeviceHeader,
     pub imu_id: Option<ImuId>,
-    pub error: ImuError,
+    pub error: SmartImuError,
     pub message: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HeartbeatFrame {
-    pub header: WireHeader,
+    pub header: DeviceHeader,
     pub active_imus: u16,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub enum WireFrame {
-    Hello(HelloFrame),
-    Topology(TopologyFrame),
+pub enum HostFrame {
+    Ping(PingRequestFrame),
+    GetInventory(GetInventoryRequestFrame),
+    GetImuInfo(GetImuInfoRequestFrame),
+    StartSampling(StartSamplingRequestFrame),
+    StopSampling(StopSamplingRequestFrame),
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum DeviceFrame {
+    Ping(PingFrame),
+    Inventory(InventoryFrame),
+    ImuInfo(ImuInfoFrame),
     ProbeResult(ProbeResultFrame),
     Sample(SampleFrame),
     Orientation(OrientationFrame),
@@ -115,8 +185,13 @@ pub enum WireFrame {
     Heartbeat(HeartbeatFrame),
 }
 
-#[cfg(feature = "binary")]
-pub fn encode_binary<const N: usize>(frame: &WireFrame) -> Result<Vec<u8>, BinaryCodecError> {
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum WireFrame {
+    Host(HostFrame),
+    Device(DeviceFrame),
+}
+
+pub fn encode_binary<const N: usize>(frame: &WireFrame) -> BinaryCodecResult<Vec<u8>> {
     let encoded = postcard::to_allocvec(frame).map_err(|_| BinaryCodecError::Postcard)?;
     if encoded.len() > N {
         return Err(BinaryCodecError::BufferTooSmall);
@@ -124,15 +199,11 @@ pub fn encode_binary<const N: usize>(frame: &WireFrame) -> Result<Vec<u8>, Binar
     Ok(encoded)
 }
 
-#[cfg(feature = "binary")]
 pub fn decode_binary(bytes: &[u8]) -> Result<WireFrame, postcard::Error> {
     postcard::from_bytes(bytes)
 }
 
-#[cfg(feature = "binary")]
-pub fn encode_binary_packet<const N: usize>(
-    frame: &WireFrame,
-) -> Result<Vec<u8>, BinaryCodecError> {
+pub fn encode_binary_packet<const N: usize>(frame: &WireFrame) -> BinaryCodecResult<Vec<u8>> {
     let mut raw = postcard::to_allocvec(frame).map_err(|_| BinaryCodecError::Postcard)?;
     if raw.len() + 4 > N {
         return Err(BinaryCodecError::BufferTooSmall);
@@ -157,8 +228,7 @@ pub fn encode_binary_packet<const N: usize>(
     Ok(framed)
 }
 
-#[cfg(feature = "binary")]
-pub fn decode_binary_packet<const N: usize>(packet: &[u8]) -> Result<WireFrame, BinaryCodecError> {
+pub fn decode_binary_packet<const N: usize>(packet: &[u8]) -> BinaryCodecResult<WireFrame> {
     if packet.is_empty() {
         return Err(BinaryCodecError::Truncated);
     }

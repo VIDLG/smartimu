@@ -12,14 +12,13 @@ use esp_hal::spi::master::{Config, Spi};
 use esp_hal::time::Rate;
 use esp_hal::timer::timg::TimerGroup;
 use esp_println::println;
-use smartimu::{
-    BusId, SpiMode, SpiProfile, ImuBus, ImuChip, ImuDriver, ImuSampleConfig, ImuTargetId, RangeDps,
-    RangeG, SampleRateHz,
-};
-use smartimu::drivers::{CandidateDriver, bmi270, hxy42688, icm42688, lsm6, qmi8658};
-use smartimu::firmware::runtime::probe_first_matching;
 use smartimu::EspImuBus;
-use smartimu::EspDriverResources;
+use smartimu::drivers::{hxy42688, icm42688, lsm6, qmi8658};
+use smartimu::{
+    BusId, CandidateDriver, ImuBus, ImuChip, ImuChipProfile, ImuDriver, ImuIdentity,
+    ImuSampleConfig, ImuTargetId, ProbePlan, RangeDps, RangeG, SampleRateHz, SpiMode, SpiProfile,
+    Turnaround, probe,
+};
 
 const SPI_FREQ_KHZ: u32 = 1_000;
 const STREAM_INTERVAL_MS: u64 = 100;
@@ -30,25 +29,11 @@ const PROFILE_MODE0: SpiProfile = SpiProfile::new(0, SpiMode::Mode0, SPI_FREQ_KH
 const PROFILE_MODE1: SpiProfile = SpiProfile::new(1, SpiMode::Mode1, SPI_FREQ_KHZ);
 const PROFILE_MODE2: SpiProfile = SpiProfile::new(2, SpiMode::Mode2, SPI_FREQ_KHZ);
 const PROFILE_MODE3: SpiProfile = SpiProfile::new(3, SpiMode::Mode3, SPI_FREQ_KHZ);
-const PROFILE_MODE0_500K: SpiProfile = SpiProfile::new(4, SpiMode::Mode0, 500);
-const PROFILE_MODE3_500K: SpiProfile = SpiProfile::new(5, SpiMode::Mode3, 500);
-const PROFILE_MODE0_100K: SpiProfile = SpiProfile::new(6, SpiMode::Mode0, 100);
-const PROFILE_MODE3_100K: SpiProfile = SpiProfile::new(7, SpiMode::Mode3, 100);
 
 const PROFILES_MODE0: [SpiProfile; 1] = [PROFILE_MODE0];
 const PROFILES_MODE3: [SpiProfile; 1] = [PROFILE_MODE3];
 const PROFILES_MODE0_3: [SpiProfile; 2] = [PROFILE_MODE0, PROFILE_MODE3];
 const PROFILES_ALL: [SpiProfile; 4] = [PROFILE_MODE0, PROFILE_MODE1, PROFILE_MODE2, PROFILE_MODE3];
-const PROFILES_BMI: [SpiProfile; 8] = [
-    PROFILE_MODE3,
-    PROFILE_MODE0,
-    PROFILE_MODE1,
-    PROFILE_MODE2,
-    PROFILE_MODE3_500K,
-    PROFILE_MODE0_500K,
-    PROFILE_MODE3_100K,
-    PROFILE_MODE0_100K,
-];
 
 #[derive(Clone, Copy)]
 struct ProbeConfig {
@@ -62,6 +47,7 @@ struct ProbeConfig {
 struct Detected<'a> {
     name: &'static str,
     driver: &'a dyn ImuDriver,
+    identity: ImuIdentity,
     profile: SpiProfile,
     sample_config: ImuSampleConfig,
 }
@@ -84,75 +70,66 @@ impl<'a> Runtime<'a> {
 
 static SLOT1_CANDIDATES: [CandidateDriver; 4] = [
     CandidateDriver {
-        descriptor: &hxy42688::DESCRIPTOR,
+        info: &hxy42688::INFO,
         profiles: &PROFILES_MODE0_3,
     },
     CandidateDriver {
-        descriptor: &lsm6::DESCRIPTOR,
+        info: &lsm6::INFO,
         profiles: &PROFILES_MODE3,
     },
     CandidateDriver {
-        descriptor: &icm42688::DESCRIPTOR,
+        info: &icm42688::INFO,
         profiles: &PROFILES_MODE0,
     },
     CandidateDriver {
-        descriptor: &qmi8658::DESCRIPTOR,
+        info: &qmi8658::INFO,
         profiles: &PROFILES_MODE0,
     },
 ];
 
 static SLOT2_CANDIDATES: [CandidateDriver; 3] = [
     CandidateDriver {
-        descriptor: &icm42688::DESCRIPTOR,
+        info: &icm42688::INFO,
         profiles: &PROFILES_ALL,
     },
     CandidateDriver {
-        descriptor: &qmi8658::DESCRIPTOR,
+        info: &qmi8658::INFO,
         profiles: &PROFILES_ALL,
     },
     CandidateDriver {
-        descriptor: &lsm6::DESCRIPTOR,
+        info: &lsm6::INFO,
         profiles: &PROFILES_MODE3,
     },
 ];
 
-static SLOT3_CANDIDATES: [CandidateDriver; 2] = [
-    CandidateDriver {
-        descriptor: &bmi270::DESCRIPTOR,
-        profiles: &PROFILES_BMI,
-    },
-    CandidateDriver {
-        descriptor: &bmi270::DESCRIPTOR,
-        profiles: &PROFILES_MODE0,
-    },
-];
+static SLOT3_CANDIDATES: [CandidateDriver; 0] = [];
 
 static SLOT4_CANDIDATES: [CandidateDriver; 2] = [
     CandidateDriver {
-        descriptor: &qmi8658::DESCRIPTOR,
+        info: &qmi8658::INFO,
         profiles: &PROFILES_MODE0,
     },
     CandidateDriver {
-        descriptor: &icm42688::DESCRIPTOR,
+        info: &icm42688::INFO,
         profiles: &PROFILES_MODE0,
     },
 ];
 
 static SLOT5_CANDIDATES: [CandidateDriver; 4] = [
     CandidateDriver {
-        descriptor: &lsm6::DESCRIPTOR,
+        info: &lsm6::INFO,
         profiles: &PROFILES_MODE0_3,
     },
     CandidateDriver {
-        descriptor: &hxy42688::DESCRIPTOR,
+        info: &hxy42688::INFO,
         profiles: &PROFILES_MODE0_3,
     },
     CandidateDriver {
-        descriptor: &qmi8658::DESCRIPTOR,
+        info: &qmi8658::INFO,
         profiles: &PROFILES_MODE0_3,
     },
     CandidateDriver {
-        descriptor: &icm42688::DESCRIPTOR,
+        info: &icm42688::INFO,
         profiles: &PROFILES_MODE0,
     },
 ];
@@ -178,7 +155,7 @@ static PROBE_CONFIGS: [ProbeConfig; 5] = [
     },
     ProbeConfig {
         label: "slot-3",
-        expected: ImuChip::Bmi270,
+        expected: ImuChip::Icm42688Pc,
         target: ImuTargetId {
             bus_id: BUS_ID,
             target_index: 2,
@@ -227,7 +204,7 @@ async fn main(_spawner: Spawner) -> ! {
     println!(" legacy_probe: old pin mapping IMU test ");
     println!("========================================");
     println!("SPI: SCK=GPIO6 MOSI=GPIO7 MISO=GPIO2");
-    println!("CS order: GPIO8, GPIO4, GPIO3, GPIO5, GPIO1");
+    println!("CS order: GPIO8, GPIO4, GPIO5, GPIO1");
 
     let spi_config = Config::default()
         .with_frequency(Rate::from_khz(SPI_FREQ_KHZ))
@@ -238,16 +215,23 @@ async fn main(_spawner: Spawner) -> ! {
         .with_mosi(peripherals.GPIO7)
         .with_miso(peripherals.GPIO2);
 
-    let targets = PROBE_CONFIGS.map(|config| config.target);
-    let chip_selects = [
-        Output::new(peripherals.GPIO8, Level::High, OutputConfig::default()),
-        Output::new(peripherals.GPIO4, Level::High, OutputConfig::default()),
-        Output::new(peripherals.GPIO3, Level::High, OutputConfig::default()),
-        Output::new(peripherals.GPIO5, Level::High, OutputConfig::default()),
-        Output::new(peripherals.GPIO1, Level::High, OutputConfig::default()),
-    ];
-    let mut bus = EspImuBus::new(&mut spi, targets, chip_selects);
-    let resources = EspDriverResources;
+    let mut bus = EspImuBus::new(&mut spi)
+        .with_target(
+            PROBE_CONFIGS[0].target,
+            Output::new(peripherals.GPIO8, Level::High, OutputConfig::default()),
+        )
+        .with_target(
+            PROBE_CONFIGS[1].target,
+            Output::new(peripherals.GPIO4, Level::High, OutputConfig::default()),
+        )
+        .with_target(
+            PROBE_CONFIGS[3].target,
+            Output::new(peripherals.GPIO5, Level::High, OutputConfig::default()),
+        )
+        .with_target(
+            PROBE_CONFIGS[4].target,
+            Output::new(peripherals.GPIO1, Level::High, OutputConfig::default()),
+        );
     let mut runtimes = PROBE_CONFIGS.each_ref().map(|config| Runtime::new(config));
 
     Timer::after_millis(POWER_UP_DELAY_MS).await;
@@ -255,49 +239,67 @@ async fn main(_spawner: Spawner) -> ! {
     for runtime in &mut runtimes {
         print_probe_snapshot(&mut bus, runtime.config.target, runtime.config.label);
 
-        match probe_first_matching(&mut bus, runtime.config.target, runtime.config.candidates) {
-            Ok(Some((driver, profile))) => {
-                let sample_config = select_imu_sample_config(driver);
-                match driver.reset(&mut bus, runtime.config.target).and_then(|_| {
-                    driver.configure(&mut bus, runtime.config.target, &sample_config, &resources)
-                }) {
+        match probe(
+            &mut bus,
+            runtime.config.target,
+            ProbePlan::Auto {
+                candidates: runtime.config.candidates,
+            },
+        )
+        .await
+        {
+            Ok(Some(probe_match)) => {
+                let driver = probe_match.driver;
+                let profile = probe_match.profile;
+                let chip_profile = probe_match.info.chip_profile;
+                let identity = probe_match.info.identity;
+                let sample_config = select_imu_sample_config(&chip_profile);
+                let result = match driver.reset(&mut bus, runtime.config.target).await {
+                    Ok(()) => {
+                        driver
+                            .configure(&mut bus, runtime.config.target, &sample_config)
+                            .await
+                    }
+                    Err(error) => Err(error),
+                };
+                match result {
                     Ok(()) => {
                         let name = runtime
                             .config
                             .candidates
                             .iter()
-                            .find(|candidate| core::ptr::eq(candidate.descriptor.driver, driver))
-                            .map(|candidate| candidate.descriptor.name)
+                            .find(|candidate| core::ptr::eq(candidate.info.driver, driver))
+                            .map(|candidate| candidate.info.name)
                             .unwrap_or("unknown");
                         runtime.detected = Some(Detected {
                             name,
                             driver,
+                            identity,
                             profile,
                             sample_config,
                         });
                         println!(
-                            "{} expected={:?} detected={} actual={:?} profile={}khz/{:?}",
+                            "{} expected={:?} detected={} actual={:?} id=0x{:02X} rev={:?} profile={}khz/{:?}",
                             runtime.config.label,
                             runtime.config.expected,
                             name,
-                            driver.chip(),
+                            chip_profile.chip,
+                            identity.who_am_i,
+                            identity.revision,
                             profile.frequency_khz,
                             profile.mode
                         );
-                        if driver.chip() != runtime.config.expected {
+                        if chip_profile.chip != runtime.config.expected {
                             println!(
                                 "  !! mismatch: expected {:?}, got {:?}",
-                                runtime.config.expected,
-                                driver.chip()
+                                runtime.config.expected, chip_profile.chip
                             );
                         }
                     }
                     Err(error) => {
                         println!(
                             "{} init failed for {:?}: {:?}",
-                            runtime.config.label,
-                            driver.chip(),
-                            error
+                            runtime.config.label, chip_profile.chip, error
                         );
                     }
                 }
@@ -332,15 +334,19 @@ async fn main(_spawner: Spawner) -> ! {
                 continue;
             }
 
-            match detected.driver.read_raw(&mut bus, runtime.config.target) {
+            match detected
+                .driver
+                .read_sample(
+                    &mut bus,
+                    runtime.config.target,
+                    smartimu::SampleReadoutRequest::default(),
+                )
+                .await
+            {
                 Ok(raw) => {
                     runtime.sample_index = runtime.sample_index.wrapping_add(1);
-                    let scale = smartimu::scale_profile_for_config(
-                        detected.driver.chip(),
-                        &detected.sample_config,
-                    )
-                    .unwrap_or_else(|| detected.driver.scale_profile());
-                    let physical = raw.to_physical(scale);
+                    let scale = smartimu::Imu6Scale::from(detected.sample_config);
+                    let physical = raw.imu6.to_physical(scale);
                     println!(
                         "{} {} #{} raw[a=({},{},{}) g=({},{},{})] phys[a=({:.3},{:.3},{:.3}) g=({:.2},{:.2},{:.2})]",
                         runtime.config.label,
@@ -370,20 +376,20 @@ async fn main(_spawner: Spawner) -> ! {
     }
 }
 
-fn print_probe_snapshot(bus: &mut dyn ImuBus<Profile = SpiProfile>, target: ImuTargetId, label: &str) {
+fn print_probe_snapshot(bus: &mut dyn ImuBus, target: ImuTargetId, label: &str) {
     let _ = bus.apply_profile(target, PROFILE_MODE0);
-    let r00_m0 = bus.read_reg(target, 0x00, 0).ok();
-    let r01_m0 = bus.read_reg(target, 0x01, 0).ok();
-    let r05_m0 = bus.read_reg(target, 0x05, 0).ok();
-    let r75_m0 = bus.read_reg(target, 0x75, 0).ok();
-    let bmi00_d1_m0 = bus.read_reg(target, 0x00, 1).ok();
+    let r00_m0 = bus.read_reg(target, 0x00, Turnaround(0)).ok();
+    let r01_m0 = bus.read_reg(target, 0x01, Turnaround(0)).ok();
+    let r05_m0 = bus.read_reg(target, 0x05, Turnaround(0)).ok();
+    let r75_m0 = bus.read_reg(target, 0x75, Turnaround(0)).ok();
+    let bmi00_d1_m0 = bus.read_reg(target, 0x00, Turnaround(1)).ok();
 
     let _ = bus.apply_profile(target, PROFILE_MODE3);
-    let r00_m3 = bus.read_reg(target, 0x00, 0).ok();
-    let r01_m3 = bus.read_reg(target, 0x01, 0).ok();
-    let r05_m3 = bus.read_reg(target, 0x05, 0).ok();
-    let r75_m3 = bus.read_reg(target, 0x75, 0).ok();
-    let bmi00_d1_m3 = bus.read_reg(target, 0x00, 1).ok();
+    let r00_m3 = bus.read_reg(target, 0x00, Turnaround(0)).ok();
+    let r01_m3 = bus.read_reg(target, 0x01, Turnaround(0)).ok();
+    let r05_m3 = bus.read_reg(target, 0x05, Turnaround(0)).ok();
+    let r75_m3 = bus.read_reg(target, 0x75, Turnaround(0)).ok();
+    let bmi00_d1_m3 = bus.read_reg(target, 0x00, Turnaround(1)).ok();
 
     println!(
         "{} probe m0[r00={:02X?} r01={:02X?} r05={:02X?} r75={:02X?} bmi_d1={:02X?}] m3[r00={:02X?} r01={:02X?} r05={:02X?} r75={:02X?} bmi_d1={:02X?}]",
@@ -401,18 +407,17 @@ fn print_probe_snapshot(bus: &mut dyn ImuBus<Profile = SpiProfile>, target: ImuT
     );
 }
 
-fn select_imu_sample_config(driver: &dyn ImuDriver) -> ImuSampleConfig {
-    let supported_sample_configs = driver.supported_sample_configs();
+fn select_imu_sample_config(chip_profile: &ImuChipProfile) -> ImuSampleConfig {
+    let sample_config_options = &chip_profile.sample_config_options;
     let preferred = ImuSampleConfig {
         accel_range: RangeG(8),
         gyro_range: RangeDps(500),
         sample_rate_hz: SampleRateHz(100),
     };
 
-    supported_sample_configs
-        .iter()
-        .copied()
-        .find(|config| *config == preferred)
-        .or_else(|| supported_sample_configs.first().copied())
+    sample_config_options
+        .contains(&preferred)
+        .then_some(preferred)
+        .or_else(|| sample_config_options.first_config())
         .unwrap_or(preferred)
 }
