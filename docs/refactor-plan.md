@@ -10,7 +10,7 @@ crates/smartimu/
     bus.rs, types.rs, driver.rs, error.rs, protocol.rs, sample.rs, resource.rs
     drivers/       ← bmi270, hxy42688, icm42688, lsm6, qmi8658
     firmware/      ← device, runtime, transport, resources
-    fusion/        ← C FFI 传感器融合
+    fusion/        ← Rust 传感器融合实现
     platform/      ← EspImuBus, EspDriverResources (feature-gated: esp)
 apps/esp32c3-board/
 tools/imu-viewer/  +  tools/imu-viewer-wgpu/

@@ -1,8 +1,9 @@
 use crate::{
     DataReadyCondition, DataReadyStatus, DriverInfo, ImuBus, ImuChip, ImuChipProfile, ImuDriver,
     ImuSampleConfig, ImuTargetId, ProbeRegisterMatch, ProbeRegisterReadout, RangeDps, RangeG,
-    SampleByteOrder, SampleRateHz, SampleRegisterReadout, SmartImuError, SpiProfile, delay_ms,
+    SampleByteOrder, SampleRateHz, SampleRegisterReadout, SmartImuError, delay_ms,
 };
+use alloc::{borrow::Cow, boxed::Box};
 use async_trait::async_trait;
 
 const CHIP_ID: u8 = 0x05;
@@ -29,7 +30,17 @@ const PROBE_MATCHES: &[ProbeRegisterMatch] = &[ProbeRegisterMatch::WhoAmIAndRevi
 }];
 
 pub static CHIP_PROFILE: ImuChipProfile = ImuChipProfile {
-    ..super::six_axis_chip_profile(ImuChip::Icm42688Pc, ACCEL_RANGES, GYRO_RANGES, SAMPLE_RATES)
+    chip: ImuChip::Icm42688Pc,
+    sample_config_options: crate::SampleConfigOptions::Independent {
+        accel_ranges: Cow::Borrowed(ACCEL_RANGES),
+        gyro_ranges: Cow::Borrowed(GYRO_RANGES),
+        sample_rates: Cow::Borrowed(SAMPLE_RATES),
+    },
+    sample_readout_support: crate::SampleReadoutSupport {
+        temperature: false,
+        sensor_timestamp: false,
+    },
+    temperature_config: None,
 };
 
 pub static DRIVER: Icm42688Driver = Icm42688Driver;

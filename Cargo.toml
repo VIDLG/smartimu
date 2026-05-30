@@ -17,7 +17,6 @@ version = "0.1.0"
 async-trait = { version = "0.1.89", default-features = false }
 bytemuck = { version = "1.25.0", features = ["derive"] }
 cobs = { version = "0.3.0", default-features = false }
-cc = "1.2.57"
 crc32fast = { version = "1.4.2", default-features = false }
 defmt = "1.0.1"
 eframe = "0.33.0"
@@ -27,6 +26,7 @@ egui-winit = "0.33.0"
 egui_plot = "0.34.0"
 pollster = "0.4.0"
 hashbrown = { version = "0.16.1", default-features = false, features = ["default-hasher"] }
+libm = "0.2.16"
 embassy-executor = { version = "0.9.1", features = ["defmt"] }
 embassy-time = { version = "0.5.0", features = ["defmt"] }
 embedded-hal = "1.0"

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use smartimu::{
-    DeviceFrame, ImuId, ImuInfo, ImuSampleConfig, OrientationFrame, RangeDps, RangeG,
+    DeviceFrame, ImuId, ImuNodeInfo, ImuSampleConfig, OrientationFrame, RangeDps, RangeG,
     SampleConfigOptions, SampleFrame, SampleRateHz,
 };
 
@@ -43,7 +43,7 @@ pub struct IntegratedOrientation {
 
 #[derive(Clone, Debug)]
 pub struct ViewerState {
-    pub imu_infos: HashMap<ImuId, ImuInfo>,
+    pub imu_infos: HashMap<ImuId, ImuNodeInfo>,
     pub latest_samples: HashMap<ImuId, SampleFrame>,
     pub latest_orientation: HashMap<ImuId, OrientationFrame>,
     pub interpolated_orientation: HashMap<ImuId, OrientationFrame>,
@@ -132,7 +132,7 @@ impl ViewerState {
                     self.imu_infos.insert(info.id, info);
                 }
             }
-            DeviceFrame::ImuInfo(frame) => {
+            DeviceFrame::ImuNodeInfo(frame) => {
                 self.update_seq(frame.header.seq);
                 if let Some(info) = frame.info {
                     self.imu_infos.insert(info.id, info);
@@ -213,7 +213,7 @@ pub fn frame_emit_timestamp_us(frame: &DeviceFrame) -> u64 {
     match frame {
         DeviceFrame::Ping(frame) => frame.header.emit_timestamp_us,
         DeviceFrame::Inventory(frame) => frame.header.emit_timestamp_us,
-        DeviceFrame::ImuInfo(frame) => frame.header.emit_timestamp_us,
+        DeviceFrame::ImuNodeInfo(frame) => frame.header.emit_timestamp_us,
         DeviceFrame::ProbeResult(frame) => frame.header.emit_timestamp_us,
         DeviceFrame::Sample(frame) => frame.header.emit_timestamp_us,
         DeviceFrame::Orientation(frame) => frame.header.emit_timestamp_us,
@@ -257,8 +257,8 @@ fn quaternion_distance(a: smartimu::Quaternion, b: smartimu::Quaternion) -> f32 
     dw * dw + dx * dx + dy * dy + dz * dz
 }
 
-fn synthesize_info(sample: &SampleFrame) -> ImuInfo {
-    ImuInfo {
+fn synthesize_info(sample: &SampleFrame) -> ImuNodeInfo {
+    ImuNodeInfo {
         id: sample.imu_id,
         bus_id: smartimu::BusId(0),
         chip_profile: fallback_chip_profile(sample.imu_chip),

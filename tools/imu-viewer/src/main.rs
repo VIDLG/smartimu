@@ -10,8 +10,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use eframe::egui;
 use egui_plot::{Legend, Line, Plot, PlotPoints};
 use smartimu::{
-    DeviceFrame, ImuId, ImuInfo, OrientationFrame, SampleFrame, WireFrame, decode_binary_packet,
-    decode_json,
+    DeviceFrame, ImuId, ImuNodeInfo, OrientationFrame, SampleFrame, WireFrame,
+    decode_binary_packet, decode_json,
 };
 
 enum ViewerEvent {
@@ -57,7 +57,7 @@ struct ViewerApp {
     baud_rate: u32,
     receiver: Option<Receiver<ViewerEvent>>,
     status: String,
-    imu_infos: HashMap<ImuId, ImuInfo>,
+    imu_infos: HashMap<ImuId, ImuNodeInfo>,
     latest_samples: HashMap<ImuId, SampleFrame>,
     history: HashMap<ImuId, VecDeque<[f64; 7]>>,
     errors: VecDeque<String>,
@@ -772,7 +772,7 @@ impl ViewerApp {
                     self.imu_infos.insert(info.id, info);
                 }
             }
-            DeviceFrame::ImuInfo(frame) => {
+            DeviceFrame::ImuNodeInfo(frame) => {
                 self.last_seq = Some(frame.header.seq);
                 if let Some(info) = frame.info {
                     self.imu_infos.insert(info.id, info);
@@ -783,7 +783,7 @@ impl ViewerApp {
                 self.update_orientation(&sample);
                 self.imu_infos
                     .entry(sample.imu_id)
-                    .or_insert_with(|| ImuInfo {
+                    .or_insert_with(|| ImuNodeInfo {
                         id: sample.imu_id,
                         bus_id: smartimu::BusId(0),
                         chip_profile: fallback_chip_profile(sample.imu_chip),
@@ -1310,7 +1310,7 @@ fn project_vertex(
     )
 }
 
-fn info_label(info: &ImuInfo, imu_id: ImuId) -> String {
+fn info_label(info: &ImuNodeInfo, imu_id: ImuId) -> String {
     info.label
         .clone()
         .unwrap_or_else(|| format!("imu-{}", imu_id.sensor_id))

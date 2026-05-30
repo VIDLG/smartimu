@@ -22,7 +22,7 @@ use esp_println::println;
 use smartimu::EspImuBus;
 use smartimu::fusion::{FusionFilter, FusionFilterSettings};
 use smartimu::{
-    BusInfo, ImuBus, ImuChip, ImuChipProfile, ImuDriver, ImuIdentity, ImuInfo, ImuSampleConfig,
+    BusInfo, ImuBus, ImuChip, ImuChipProfile, ImuDriver, ImuNodeInfo, ImuSampleConfig,
     OrientationFrame, ProbePlan, RangeDps, RangeG, SampleRateHz, SessionRuntime, SpiProfile,
     Turnaround, WireFormat, bounded_string, encode_binary_packet, encode_json, probe,
 };
@@ -35,12 +35,11 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct DetectedImu {
     name: &'static str,
     driver: &'static dyn ImuDriver,
     chip_profile: ImuChipProfile,
-    identity: ImuIdentity,
     profile: SpiProfile,
     sample_config: ImuSampleConfig,
 }
@@ -117,6 +116,7 @@ impl<'d> Transport<'d> {
 async fn main(_spawner: Spawner) -> ! {
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
     let peripherals = esp_hal::init(config);
+    init_heap();
 
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     let sw_interrupt =
@@ -180,7 +180,6 @@ async fn main(_spawner: Spawner) -> ! {
                 let driver = probe_match.driver;
                 let profile = probe_match.profile;
                 let chip_profile = probe_match.info.chip_profile.clone();
-                let identity = probe_match.info.identity;
                 let sample_config = select_imu_sample_config(&chip_profile);
                 let result = match driver.reset(&mut bus, runtime.config.target).await {
                     Ok(()) => {
@@ -202,8 +201,7 @@ async fn main(_spawner: Spawner) -> ! {
                                 .map(|candidate| candidate.info.name)
                                 .unwrap_or("unknown"),
                             driver,
-                            chip_profile,
-                            identity,
+                            chip_profile: chip_profile.clone(),
                             profile,
                             sample_config,
                         });
@@ -214,10 +212,10 @@ async fn main(_spawner: Spawner) -> ! {
                         transport.emit_frame(&session.probe_result(
                             emit_timestamp_us(boot),
                             runtime.config.imu_id,
-                            runtime.detected.unwrap().name,
+                            runtime.detected.as_ref().unwrap().name,
                             smartimu::ProbeResult::Detected {
                                 driver_id: smartimu::bounded_string(
-                                    runtime.detected.unwrap().name,
+                                    runtime.detected.as_ref().unwrap().name,
                                     smartimu::MAX_LABEL_LEN,
                                 ),
                                 chip: chip_profile.chip,
@@ -278,7 +276,7 @@ async fn main(_spawner: Spawner) -> ! {
     loop {
         let mut active_imus = 0u16;
         for runtime in &mut runtimes {
-            let Some(detected) = runtime.detected else {
+            let Some(detected) = runtime.detected.as_ref() else {
                 continue;
             };
             active_imus += 1;
@@ -375,6 +373,10 @@ async fn main(_spawner: Spawner) -> ! {
     }
 }
 
+fn init_heap() {
+    esp_alloc::heap_allocator!(size: 32 * 1024);
+}
+
 fn emit_timestamp_us(boot: Instant) -> u64 {
     Instant::now().duration_since(boot).as_micros()
 }
@@ -388,17 +390,17 @@ fn bus_infos() -> Vec<BusInfo> {
     buses
 }
 
-fn imu_infos(runtimes: &[ImuRuntime; 5]) -> Vec<ImuInfo> {
+fn imu_infos(runtimes: &[ImuRuntime; 5]) -> Vec<ImuNodeInfo> {
     let mut imus = Vec::new();
     for runtime in runtimes {
-        let Some(detected) = runtime.detected else {
+        let Some(detected) = runtime.detected.as_ref() else {
             continue;
         };
 
-        let info = ImuInfo {
+        let info = ImuNodeInfo {
             id: runtime.config.imu_id,
             bus_id: board::BUS_ID,
-            chip_profile: detected.chip_profile,
+            chip_profile: detected.chip_profile.clone(),
             label: Some(bounded_string(
                 runtime.config.label,
                 smartimu::MAX_LABEL_LEN,

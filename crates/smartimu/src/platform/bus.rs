@@ -1,4 +1,5 @@
 use crate::{ImuBus, ImuTargetId, SmartImuError, SpiMode, SpiProfile, Turnaround};
+use embedded_hal::spi::SpiBus;
 use esp_hal::Blocking;
 use esp_hal::gpio::Output;
 use esp_hal::spi::master::{Config, Spi};

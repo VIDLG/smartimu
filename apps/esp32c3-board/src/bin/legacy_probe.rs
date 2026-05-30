@@ -15,9 +15,8 @@ use esp_println::println;
 use smartimu::EspImuBus;
 use smartimu::drivers::{hxy42688, icm42688, lsm6, qmi8658};
 use smartimu::{
-    BusId, CandidateDriver, ImuBus, ImuChip, ImuChipProfile, ImuDriver, ImuIdentity,
-    ImuSampleConfig, ImuTargetId, ProbePlan, RangeDps, RangeG, SampleRateHz, SpiMode, SpiProfile,
-    Turnaround, probe,
+    BusId, CandidateDriver, ImuBus, ImuChip, ImuChipProfile, ImuDriver, ImuSampleConfig,
+    ImuTargetId, ProbePlan, RangeDps, RangeG, SampleRateHz, SpiMode, SpiProfile, Turnaround, probe,
 };
 
 const SPI_FREQ_KHZ: u32 = 1_000;
@@ -47,7 +46,6 @@ struct ProbeConfig {
 struct Detected<'a> {
     name: &'static str,
     driver: &'a dyn ImuDriver,
-    identity: ImuIdentity,
     profile: SpiProfile,
     sample_config: ImuSampleConfig,
 }
@@ -194,6 +192,7 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
 async fn main(_spawner: Spawner) -> ! {
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
     let peripherals = esp_hal::init(config);
+    init_heap();
 
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     let sw_interrupt =
@@ -274,7 +273,6 @@ async fn main(_spawner: Spawner) -> ! {
                         runtime.detected = Some(Detected {
                             name,
                             driver,
-                            identity,
                             profile,
                             sample_config,
                         });
@@ -352,12 +350,12 @@ async fn main(_spawner: Spawner) -> ! {
                         runtime.config.label,
                         detected.name,
                         runtime.sample_index,
-                        raw.accel[0],
-                        raw.accel[1],
-                        raw.accel[2],
-                        raw.gyro[0],
-                        raw.gyro[1],
-                        raw.gyro[2],
+                        raw.imu6.accel[0],
+                        raw.imu6.accel[1],
+                        raw.imu6.accel[2],
+                        raw.imu6.gyro[0],
+                        raw.imu6.gyro[1],
+                        raw.imu6.gyro[2],
                         physical.accel_g[0],
                         physical.accel_g[1],
                         physical.accel_g[2],
@@ -374,6 +372,10 @@ async fn main(_spawner: Spawner) -> ! {
 
         Timer::after_millis(STREAM_INTERVAL_MS).await;
     }
+}
+
+fn init_heap() {
+    esp_alloc::heap_allocator!(size: 32 * 1024);
 }
 
 fn print_probe_snapshot(bus: &mut dyn ImuBus, target: ImuTargetId, label: &str) {

@@ -1711,6 +1711,7 @@ version = "0.1.0"
 dependencies = [
  "embassy-executor",
  "embassy-time",
+ "esp-alloc",
  "esp-bootloader-esp-idf",
  "esp-hal",
  "esp-println",
@@ -3859,13 +3860,13 @@ name = "smartimu"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "cc",
  "cobs",
  "crc32fast",
  "embassy-time",
  "embedded-hal 1.0.0",
  "esp-hal",
  "hashbrown 0.16.1",
+ "libm",
  "postcard",
  "serde",
  "serde-json-core",

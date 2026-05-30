@@ -13,6 +13,7 @@ binary-transport = []
 embassy-executor.workspace = true
 embassy-time.workspace = true
 esp-bootloader-esp-idf = { workspace = true, features = ["esp32c3"] }
+esp-alloc = "0.9.0"
 esp-hal = { workspace = true, features = ["esp32c3"] }
 esp-println = { workspace = true, features = ["defmt-espflash", "uart", "esp32c3"] }
 esp-rtos = { workspace = true, features = ["esp32c3"] }

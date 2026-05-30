@@ -3,7 +3,7 @@ use crate::delay_ms;
 use crate::device::DetectedImuDevice;
 use crate::driver::{DriverInfo, ImuDriver};
 use crate::error::SmartImuError;
-use crate::types::ProbeInfo;
+use crate::types::DetectedChipInfo;
 
 #[derive(Clone, Copy)]
 pub struct CandidateDriver {
@@ -22,11 +22,11 @@ pub enum ProbePlan<'a> {
     },
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone)]
 pub struct ProbeMatch {
     pub driver: &'static dyn ImuDriver,
     pub profile: SpiProfile,
-    pub info: ProbeInfo,
+    pub info: DetectedChipInfo,
 }
 
 impl ProbeMatch {

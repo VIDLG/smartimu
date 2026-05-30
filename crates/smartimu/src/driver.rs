@@ -3,7 +3,7 @@ use crate::delay_ms;
 use crate::error::{SmartImuError, UnsupportedConfigReason};
 use crate::sample::{RawImu6, RawImuSample, SampleReadoutRequest};
 use crate::types::{
-    ImuChipProfile, ImuId, ImuIdentity, ImuSampleConfig, ProbeInfo, SampleConfigOptions,
+    DetectedChipInfo, ImuChipProfile, ImuId, ImuIdentity, ImuSampleConfig, SampleConfigOptions,
     SampleReadoutSupport,
 };
 use alloc::boxed::Box;
@@ -61,7 +61,7 @@ impl ProbeRegisterReadout {
         bus: &mut dyn ImuBus,
         target: ImuTargetId,
         chip_profile: &'static ImuChipProfile,
-    ) -> Result<Option<ProbeInfo>, SmartImuError> {
+    ) -> Result<Option<DetectedChipInfo>, SmartImuError> {
         for _ in 0..self.attempts {
             let who_am_i = bus.read_reg(target, self.who_am_i_register, crate::Turnaround(0))?;
             let revision = match self.revision_register {
@@ -74,7 +74,7 @@ impl ProbeRegisterReadout {
                 .iter()
                 .any(|probe_match| probe_match.matches(who_am_i, revision))
             {
-                return Ok(Some(ProbeInfo {
+                return Ok(Some(DetectedChipInfo {
                     chip_profile: chip_profile.clone(),
                     identity: ImuIdentity { who_am_i, revision },
                 }));
@@ -198,7 +198,7 @@ pub trait ImuDriver: Sync {
         &self,
         bus: &mut dyn ImuBus,
         target: ImuTargetId,
-    ) -> Result<Option<ProbeInfo>, SmartImuError> {
+    ) -> Result<Option<DetectedChipInfo>, SmartImuError> {
         let info = self.info();
         info.probe.read(bus, target, info.chip_profile).await
     }

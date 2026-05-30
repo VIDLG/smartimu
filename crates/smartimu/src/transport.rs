@@ -1,6 +1,6 @@
 use crate::{
-    BusInfo, DeviceFrame, DeviceHeader, ErrorFrame, HeartbeatFrame, ImuChip, ImuId, ImuInfo,
-    ImuInfoFrame, InventoryFrame, MAX_MESSAGE_LEN, PROTOCOL_VERSION, PingFrame, ProbeResult,
+    BusInfo, DeviceFrame, DeviceHeader, ErrorFrame, HeartbeatFrame, ImuChip, ImuId, ImuNodeInfo,
+    ImuNodeInfoFrame, InventoryFrame, MAX_MESSAGE_LEN, PROTOCOL_VERSION, PingFrame, ProbeResult,
     ProbeResultFrame, RawImuSample, SampleFrame, SmartImuError, SystemInfo, WireFormat,
 };
 use alloc::string::{String, ToString};
@@ -48,7 +48,7 @@ impl SessionRuntime {
         emit_timestamp_us: u64,
         system_label: &str,
         buses: Vec<BusInfo>,
-        imus: Vec<ImuInfo>,
+        imus: Vec<ImuNodeInfo>,
     ) -> DeviceFrame {
         DeviceFrame::Inventory(InventoryFrame {
             header: self.header(emit_timestamp_us),
@@ -65,9 +65,9 @@ impl SessionRuntime {
         &mut self,
         emit_timestamp_us: u64,
         imu_id: ImuId,
-        info: Option<ImuInfo>,
+        info: Option<ImuNodeInfo>,
     ) -> DeviceFrame {
-        DeviceFrame::ImuInfo(ImuInfoFrame {
+        DeviceFrame::ImuNodeInfo(ImuNodeInfoFrame {
             header: self.header(emit_timestamp_us),
             imu_id,
             info,

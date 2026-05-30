@@ -68,12 +68,7 @@
 
 ## BMI270
 
-BMI270 被视为“资源型驱动”：
-
-- 通用驱动生命周期保持一致
-- 额外配置 blob 通过 `DriverResources` 注入
-- 第三方源文件位于 `contrib/bmi270/`
-- 当前 blob 生成逻辑位于 `crates/imu-platform-esp/build.rs`
+BMI270 支持已经从当前 active codebase 移除。它的初始化需要额外配置 blob，后续如果重新支持，应按资源型驱动单独设计，而不是混入当前通用寄存器配置流程。
 
 ## Protocol
 

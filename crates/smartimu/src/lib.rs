@@ -35,8 +35,8 @@ pub use sample::{
     RawImuSample, RawTemperature, SampleReadoutRequest, SensorTimestamp,
 };
 pub use types::{
-    BusId, BusInfo, ImuChip, ImuChipProfile, ImuId, ImuIdentity, ImuInfo, ImuSampleConfig,
-    ProbeInfo, Quaternion, RangeDps, RangeG, SampleConfigOptions, SampleRateHz,
+    BusId, BusInfo, DetectedChipInfo, ImuChip, ImuChipProfile, ImuId, ImuIdentity, ImuNodeInfo,
+    ImuSampleConfig, Quaternion, RangeDps, RangeG, SampleConfigOptions, SampleRateHz,
     SampleReadoutSupport, SystemInfo, TemperatureConfig, TemperatureScale,
 };
 

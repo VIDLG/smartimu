@@ -92,17 +92,16 @@ drivers/*.rs (individual IMU driver implementations)
    - Drivers return `RawSample` (raw register values)
    - `RawSample` is converted to `PhysicalSample` (physical units: g, dps) using the driver's `ScaleProfile`
 
-5. **BMI270 Special Handling (`crates/imu-platform-esp/build.rs`)**
-   - BMI270 requires loading a configuration blob on initialization
-   - `crates/imu-platform-esp/build.rs` extracts the config array from `contrib/bmi270/bmi270_upstream.c` at compile time
-   - Generated as `BMI270_CONFIG` constant in `OUT_DIR/bmi270_config.rs`
+5. **Fusion and BMI270**
+   - Fusion is implemented in Rust under `crates/smartimu/src/fusion`.
+   - BMI270 support and its external configuration blob have been removed from the active codebase.
 
 ### Module Breakdown
 
 - **crates/imu-core/**: Core IMU models, traits, and protocol types
 - **crates/imu-drivers/**: Concrete driver implementations
 - **crates/imu-firmware/**: Platform-independent runtime and device topology
-- **crates/imu-platform-esp/**: `esp-hal` integration and BMI270 blob generation
+- **crates/imu-platform-esp/**: legacy platform split; current ESP integration lives under `smartimu`
 - **apps/esp32c3-board/**: Current board-specific device application entry point
 - **tools/imu-viewer/**: Host-side desktop viewer scaffold
 

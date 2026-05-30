@@ -2,7 +2,7 @@ use crate::bus::{ImuBus, ImuTargetId, SpiProfile};
 use crate::driver::ImuDriver;
 use crate::error::SmartImuError;
 use crate::sample::{RawImuSample, SampleReadoutRequest};
-use crate::types::{ImuInfo, ImuSampleConfig, ProbeInfo};
+use crate::types::{DetectedChipInfo, ImuNodeInfo, ImuSampleConfig};
 use alloc::string::String;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -18,7 +18,7 @@ pub struct ImuDevice<State> {
     pub driver: &'static dyn ImuDriver,
     pub target: ImuTargetId,
     pub spi_profile: SpiProfile,
-    pub probe_info: ProbeInfo,
+    pub probe_info: DetectedChipInfo,
     pub state: State,
 }
 
@@ -30,7 +30,7 @@ impl DetectedImuDevice {
         driver: &'static dyn ImuDriver,
         target: ImuTargetId,
         spi_profile: SpiProfile,
-        probe_info: ProbeInfo,
+        probe_info: DetectedChipInfo,
     ) -> Self {
         Self {
             driver,
@@ -61,8 +61,13 @@ impl DetectedImuDevice {
 }
 
 impl ConfiguredImuDevice {
-    pub fn info(&self, id: crate::ImuId, bus_id: crate::BusId, label: Option<String>) -> ImuInfo {
-        ImuInfo {
+    pub fn info(
+        &self,
+        id: crate::ImuId,
+        bus_id: crate::BusId,
+        label: Option<String>,
+    ) -> ImuNodeInfo {
+        ImuNodeInfo {
             id,
             bus_id,
             chip_profile: self.probe_info.chip_profile.clone(),

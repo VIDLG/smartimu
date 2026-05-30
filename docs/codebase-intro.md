@@ -289,18 +289,9 @@ pub enum WireFrame {
 
 ## 姿态融合是怎么接进来的
 
-文件：[`crates/imu-fusion/src/lib.rs`](../crates/imu-fusion/src/lib.rs)
+文件：[`crates/smartimu/src/fusion/mod.rs`](../crates/smartimu/src/fusion/mod.rs)
 
-这个 crate 不是纯 Rust 算法实现，而是对 `contrib/fusion/` 下 C 库的一个 Rust 封装。
-
-你会看到：
-
-- `unsafe extern "C"`
-- `FusionAhrs...` 这些函数声明
-
-这表示 Rust 在调用外部 C 代码。
-
-对应的 [`crates/imu-fusion/build.rs`](../crates/imu-fusion/build.rs) 会在编译时把 `contrib/fusion` 里的 C 文件一起编进来。
+姿态融合现在是 `smartimu` 内部的纯 Rust 实现，不再通过 FFI 调用外部 C 库，也不再需要额外的融合算法 `build.rs`。
 
 主程序中这段逻辑的作用是：
 
@@ -309,18 +300,11 @@ pub enum WireFrame {
 3. 拿到四元数 `Quaternion`。
 4. 发送 `Orientation` 协议帧给上位机。
 
-## BMI270 为什么看起来特别“重”
+## BMI270 为什么被移出了当前支持
 
 这是项目里另一个容易让新手疑惑的点。
 
-BMI270 配置时需要一段配置 blob。这个 blob 的来源不是手写在 Rust 代码里，而是：
-
-1. 原始数据放在 `contrib/bmi270/bmi270_upstream.c`
-2. [`crates/imu-platform-esp/build.rs`](../crates/imu-platform-esp/build.rs) 在编译时把这个 C 文件里的数组提取出来
-3. 生成 `bmi270_config.rs`
-4. [`crates/imu-platform-esp/src/resources.rs`](../crates/imu-platform-esp/src/resources.rs) 再把它作为 `DriverResources` 提供给 BMI270 驱动
-
-所以 BMI270 驱动会比其他驱动多一个“加载资源”的概念，这不是代码写乱了，而是芯片本身就需要这一步。
+BMI270 的初始化流程需要额外配置 blob，和当前已支持芯片的寄存器配置流程差异较大。当前代码库已经移除 BMI270 支持和外部配置 blob，后续如果重新支持，应作为单独的资源型驱动设计。
 
 ## PC 端 viewer 在做什么
 

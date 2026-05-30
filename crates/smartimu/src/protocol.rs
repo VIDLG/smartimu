@@ -6,7 +6,7 @@ use thiserror::Error;
 use crate::bus::SpiProfile;
 use crate::error::SmartImuError;
 use crate::sample::{RawImuSample, SampleReadoutRequest};
-use crate::types::{BusInfo, ImuChip, ImuId, ImuInfo, Quaternion, SystemInfo};
+use crate::types::{BusInfo, ImuChip, ImuId, ImuNodeInfo, Quaternion, SystemInfo};
 
 pub const PROTOCOL_VERSION: u8 = 1;
 pub const MAX_IMUS_PER_SYSTEM: usize = 16;
@@ -69,7 +69,7 @@ pub struct GetInventoryRequestFrame {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct GetImuInfoRequestFrame {
+pub struct GetImuNodeInfoRequestFrame {
     pub header: HostHeader,
     pub imu_id: ImuId,
 }
@@ -98,14 +98,14 @@ pub struct InventoryFrame {
     pub header: DeviceHeader,
     pub system: SystemInfo,
     pub buses: Vec<BusInfo>,
-    pub imus: Vec<ImuInfo>,
+    pub imus: Vec<ImuNodeInfo>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct ImuInfoFrame {
+pub struct ImuNodeInfoFrame {
     pub header: DeviceHeader,
     pub imu_id: ImuId,
-    pub info: Option<ImuInfo>,
+    pub info: Option<ImuNodeInfo>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -168,7 +168,7 @@ pub struct HeartbeatFrame {
 pub enum HostFrame {
     Ping(PingRequestFrame),
     GetInventory(GetInventoryRequestFrame),
-    GetImuInfo(GetImuInfoRequestFrame),
+    GetImuNodeInfo(GetImuNodeInfoRequestFrame),
     StartSampling(StartSamplingRequestFrame),
     StopSampling(StopSamplingRequestFrame),
 }
@@ -177,7 +177,7 @@ pub enum HostFrame {
 pub enum DeviceFrame {
     Ping(PingFrame),
     Inventory(InventoryFrame),
-    ImuInfo(ImuInfoFrame),
+    ImuNodeInfo(ImuNodeInfoFrame),
     ProbeResult(ProbeResultFrame),
     Sample(SampleFrame),
     Orientation(OrientationFrame),

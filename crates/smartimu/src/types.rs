@@ -138,13 +138,13 @@ pub struct ImuIdentity {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct ProbeInfo {
+pub struct DetectedChipInfo {
     pub chip_profile: ImuChipProfile,
     pub identity: ImuIdentity,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct ImuInfo {
+pub struct ImuNodeInfo {
     pub id: ImuId,
     pub bus_id: BusId,
     pub chip_profile: ImuChipProfile,
