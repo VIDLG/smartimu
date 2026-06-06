@@ -24,12 +24,6 @@ pub struct RawImuSample {
     pub sensor_timestamp: Option<SensorTimestamp>,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SampleReadoutRequest {
-    pub temperature: bool,
-    pub sensor_timestamp: bool,
-}
-
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct PhysicalImu6 {
     pub accel_g: [f32; 3],

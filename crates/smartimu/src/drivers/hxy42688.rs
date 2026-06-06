@@ -32,16 +32,13 @@ const PROBE_MATCHES: &[ProbeRegisterMatch] = &[ProbeRegisterMatch::WhoAmIAndRevi
 
 pub static CHIP_PROFILE: ImuChipProfile = ImuChipProfile {
     chip: ImuChip::Icm42688Hxy,
-    sample_config_options: crate::SampleConfigOptions::Independent {
+    sample_config_capability: crate::SampleConfigCapability::Independent {
         accel_ranges: Cow::Borrowed(ACCEL_RANGES),
         gyro_ranges: Cow::Borrowed(GYRO_RANGES),
         sample_rates: Cow::Borrowed(SAMPLE_RATES),
     },
-    sample_readout_support: crate::SampleReadoutSupport {
-        temperature: false,
-        sensor_timestamp: false,
-    },
-    temperature_config: None,
+    sensor_timestamp: false,
+    temperature_scale: None,
 };
 
 pub static DRIVER: Hxy42688Driver = Hxy42688Driver;
@@ -84,7 +81,7 @@ impl ImuDriver for Hxy42688Driver {
         target: ImuTargetId,
         config: &ImuSampleConfig,
     ) -> Result<(), SmartImuError> {
-        crate::ensure_sample_config_supported(&INFO.chip_profile.sample_config_options, config)?;
+        crate::ensure_sample_config_allowed(&INFO.chip_profile.sample_config_capability, config)?;
 
         // Enable accel/gyro before touching their range and filter registers.
         bus.write_reg(target, REG_PWR_CTRL, 0x0E)?;

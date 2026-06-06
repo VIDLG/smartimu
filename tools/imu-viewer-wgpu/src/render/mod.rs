@@ -344,7 +344,9 @@ fn build_instances(state: &ViewerState) -> Vec<InstanceRaw> {
                 ViewMode::Quaternion => state
                     .interpolated_orientation
                     .get(&imu_id)
-                    .map(|frame| model_matrix(position, scale, Some(frame.quaternion), None))
+                    .map(|frame| {
+                        model_matrix(position, scale, Some(frame.payload.quaternion), None)
+                    })
                     .unwrap_or_else(|| model_matrix(position, scale, None, None)),
                 ViewMode::Raw6Axis => {
                     let integrated = state.integrated_orientation.get(&imu_id).copied();

@@ -5,14 +5,15 @@ use thiserror::Error;
 
 use crate::bus::SpiProfile;
 use crate::error::SmartImuError;
-use crate::sample::{RawImuSample, SampleReadoutRequest};
-use crate::types::{BusInfo, ImuChip, ImuId, ImuNodeInfo, Quaternion, SystemInfo};
+use crate::sample::RawImuSample;
+use crate::types::{BusInfo, DetectedChipInfo, ImuId, ImuNodeInfo, Quaternion, SystemInfo};
 
 pub const PROTOCOL_VERSION: u8 = 1;
 pub const MAX_IMUS_PER_SYSTEM: usize = 16;
 pub const MAX_BUSES_PER_SYSTEM: usize = 8;
 pub const MAX_LABEL_LEN: usize = 32;
 pub const MAX_MESSAGE_LEN: usize = 96;
+pub const MAX_BINARY_PACKET_LEN: usize = 1024;
 
 pub type BinaryCodecResult<T> = Result<T, BinaryCodecError>;
 
@@ -40,15 +41,15 @@ pub enum WireFormat {
 pub struct DeviceHeader {
     pub protocol_version: u8,
     pub format: WireFormat,
-    /// Identifies which physical board is sending this frame.
+    /// Identifies which physical board is sending this message.
     /// Allows a host to distinguish data from multiple boards.
     pub system_id: u16,
     /// Distinguishes different run sessions on the same board (increments on reboot).
     pub session_id: u32,
     /// Monotonically increasing sequence number for ordering and loss detection.
     pub seq: u32,
-    /// Device-side timestamp captured when this frame is emitted.
-    pub emit_timestamp_us: u64,
+    /// Device-side timestamp captured when this message is emitted.
+    pub timestamp_us: u64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -58,223 +59,308 @@ pub struct HostHeader {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PingRequestFrame {
+pub struct PingRequest {
     pub header: HostHeader,
     pub message: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct GetInventoryRequestFrame {
-    pub header: HostHeader,
+pub enum ResponseResult<T> {
+    Ok(T),
+    Err(ProtocolError),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct GetImuNodeInfoRequestFrame {
-    pub header: HostHeader,
-    pub imu_id: ImuId,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct StartSamplingRequestFrame {
-    pub header: HostHeader,
-    pub imu_id: Option<ImuId>,
-    pub sample_request: SampleReadoutRequest,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct StopSamplingRequestFrame {
-    pub header: HostHeader,
-    pub imu_id: Option<ImuId>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PingFrame {
-    pub header: DeviceHeader,
-    pub message: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct InventoryFrame {
-    pub header: DeviceHeader,
-    pub system: SystemInfo,
-    pub buses: Vec<BusInfo>,
-    pub imus: Vec<ImuNodeInfo>,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct ImuNodeInfoFrame {
-    pub header: DeviceHeader,
-    pub imu_id: ImuId,
-    pub info: Option<ImuNodeInfo>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ProbeResultFrame {
-    pub header: DeviceHeader,
-    pub imu_id: ImuId,
-    pub probe_label: String,
-    pub result: ProbeResult,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ProbeResult {
-    Detected {
-        driver_id: String,
-        chip: ImuChip,
-        profile: SpiProfile,
-    },
-    NotDetected,
-    Failed {
-        error: SmartImuError,
-    },
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SampleFrame {
-    pub header: DeviceHeader,
-    pub imu_id: ImuId,
-    pub imu_chip: ImuChip,
-    pub sample_index: u32,
-    pub sample_timestamp_us: u64,
-    pub sample: RawImuSample,
-    pub status_bits: u16,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct OrientationFrame {
-    pub header: DeviceHeader,
-    pub imu_id: ImuId,
-    pub imu_chip: ImuChip,
-    pub sample_index: u32,
-    pub sample_timestamp_us: u64,
-    pub quaternion: Quaternion,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ErrorFrame {
-    pub header: DeviceHeader,
+pub struct ProtocolError {
     pub imu_id: Option<ImuId>,
     pub error: SmartImuError,
     pub message: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct HeartbeatFrame {
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Response<T> {
     pub header: DeviceHeader,
-    pub active_imus: u16,
+    pub result: ResponseResult<T>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub enum HostFrame {
-    Ping(PingRequestFrame),
-    GetInventory(GetInventoryRequestFrame),
-    GetImuNodeInfo(GetImuNodeInfoRequestFrame),
-    StartSampling(StartSamplingRequestFrame),
-    StopSampling(StopSamplingRequestFrame),
+pub struct Event<T> {
+    pub header: DeviceHeader,
+    pub payload: T,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PongPayload {
+    pub message: String,
+}
+
+pub type PongResponse = Response<PongPayload>;
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GetInventoryRequest {
+    pub header: HostHeader,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub enum DeviceFrame {
-    Ping(PingFrame),
-    Inventory(InventoryFrame),
-    ImuNodeInfo(ImuNodeInfoFrame),
-    ProbeResult(ProbeResultFrame),
-    Sample(SampleFrame),
-    Orientation(OrientationFrame),
-    Error(ErrorFrame),
-    Heartbeat(HeartbeatFrame),
+pub struct InventoryPayload {
+    pub system: SystemInfo,
+    pub buses: Vec<BusInfo>,
+    pub imus: Vec<ImuNodeInfo>,
+}
+
+pub type InventoryResponse = Response<InventoryPayload>;
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GetImuNodeInfoRequest {
+    pub header: HostHeader,
+    pub imu_id: ImuId,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub enum WireFrame {
-    Host(HostFrame),
-    Device(DeviceFrame),
+pub struct ImuNodeInfoPayload {
+    pub imu_id: ImuId,
+    pub info: ImuNodeInfo,
 }
 
-pub fn encode_binary<const N: usize>(frame: &WireFrame) -> BinaryCodecResult<Vec<u8>> {
-    let encoded = postcard::to_allocvec(frame).map_err(|_| BinaryCodecError::Postcard)?;
-    if encoded.len() > N {
-        return Err(BinaryCodecError::BufferTooSmall);
-    }
-    Ok(encoded)
+pub type ImuNodeInfoResponse = Response<ImuNodeInfoPayload>;
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ImuSelection {
+    All,
+    One(ImuId),
+    Many(Vec<ImuId>),
 }
 
-pub fn decode_binary(bytes: &[u8]) -> Result<WireFrame, postcard::Error> {
-    postcard::from_bytes(bytes)
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SampleReadoutRequest {
+    pub temperature: bool,
+    pub sensor_timestamp: bool,
 }
 
-pub fn encode_binary_packet<const N: usize>(frame: &WireFrame) -> BinaryCodecResult<Vec<u8>> {
-    let mut raw = postcard::to_allocvec(frame).map_err(|_| BinaryCodecError::Postcard)?;
-    if raw.len() + 4 > N {
-        return Err(BinaryCodecError::BufferTooSmall);
-    }
-    let crc = crc32fast::hash(raw.as_slice()).to_le_bytes();
-    for byte in crc {
-        raw.push(byte);
-    }
-
-    let encoded_len = cobs::max_encoding_length(raw.len());
-    if encoded_len + 1 > N {
-        return Err(BinaryCodecError::BufferTooSmall);
-    }
-
-    let mut scratch = [0u8; N];
-    let used = cobs::encode(raw.as_slice(), &mut scratch);
-    let mut framed = Vec::new();
-    for byte in &scratch[..used] {
-        framed.push(*byte);
-    }
-    framed.push(0);
-    Ok(framed)
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StartSamplingRequest {
+    pub header: HostHeader,
+    pub selection: ImuSelection,
+    pub sample_request: SampleReadoutRequest,
 }
 
-pub fn decode_binary_packet<const N: usize>(packet: &[u8]) -> BinaryCodecResult<WireFrame> {
-    if packet.is_empty() {
-        return Err(BinaryCodecError::Truncated);
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StartSamplingPayload {
+    pub imu_ids: Vec<ImuId>,
+}
+
+pub type StartSamplingResponse = Response<StartSamplingPayload>;
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StopSamplingRequest {
+    pub header: HostHeader,
+    pub selection: ImuSelection,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StopSamplingPayload {
+    pub imu_ids: Vec<ImuId>,
+}
+
+pub type StopSamplingResponse = Response<StopSamplingPayload>;
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ProbeDetectedPayload {
+    pub imu_id: ImuId,
+    pub driver_id: String,
+    pub spi_profile: SpiProfile,
+    pub chip_info: DetectedChipInfo,
+}
+
+pub type ProbeDetectedEvent = Event<ProbeDetectedPayload>;
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RawSamplePayload {
+    pub imu_id: ImuId,
+    pub sample_index: u32,
+    pub timestamp_us: u64,
+    pub sample: RawImuSample,
+}
+
+pub type RawSampleEvent = Event<RawSamplePayload>;
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct OrientationPayload {
+    pub imu_id: ImuId,
+    pub sample_index: u32,
+    pub timestamp_us: u64,
+    pub quaternion: Quaternion,
+}
+
+pub type OrientationEvent = Event<OrientationPayload>;
+
+pub type ErrorEvent = Event<ProtocolError>;
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HeartbeatPayload {
+    pub active_imu_ids: Vec<ImuId>,
+}
+
+pub type HeartbeatEvent = Event<HeartbeatPayload>;
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum HostRequest {
+    Ping(PingRequest),
+    GetInventory(GetInventoryRequest),
+    GetImuNodeInfo(GetImuNodeInfoRequest),
+    StartSampling(StartSamplingRequest),
+    StopSampling(StopSamplingRequest),
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum DeviceResponse {
+    Pong(PongResponse),
+    Inventory(InventoryResponse),
+    ImuNodeInfo(ImuNodeInfoResponse),
+    StartSampling(StartSamplingResponse),
+    StopSampling(StopSamplingResponse),
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum DeviceEvent {
+    ProbeDetected(ProbeDetectedEvent),
+    RawSample(RawSampleEvent),
+    Orientation(OrientationEvent),
+    Error(ErrorEvent),
+    Heartbeat(HeartbeatEvent),
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum DeviceMessage {
+    Response(DeviceResponse),
+    Event(DeviceEvent),
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum WireMessage {
+    Host(HostRequest),
+    Device(DeviceMessage),
+}
+
+#[derive(Debug)]
+pub struct BinaryEncoder {
+    raw: Vec<u8>,
+    framed: Vec<u8>,
+}
+
+impl BinaryEncoder {
+    pub fn new() -> Self {
+        Self {
+            raw: Vec::with_capacity(MAX_BINARY_PACKET_LEN),
+            framed: Vec::with_capacity(MAX_BINARY_PACKET_LEN),
+        }
     }
 
-    let encoded = if packet.last() == Some(&0) {
-        &packet[..packet.len() - 1]
-    } else {
-        packet
-    };
+    pub fn encode_packet(&mut self, message: &WireMessage) -> BinaryCodecResult<&[u8]> {
+        self.framed.clear();
 
-    if encoded.is_empty() {
-        return Err(BinaryCodecError::Truncated);
+        self.raw.clear();
+        let raw = core::mem::take(&mut self.raw);
+        self.raw = postcard::to_extend(message, raw).map_err(|_| BinaryCodecError::Postcard)?;
+        if self.raw.len() + 4 > MAX_BINARY_PACKET_LEN {
+            return Err(BinaryCodecError::BufferTooSmall);
+        }
+
+        let crc = crc32fast::hash(self.raw.as_slice()).to_le_bytes();
+        for byte in crc {
+            self.raw.push(byte);
+        }
+
+        let encoded_len = cobs::max_encoding_length(self.raw.len());
+        if encoded_len + 1 > MAX_BINARY_PACKET_LEN {
+            return Err(BinaryCodecError::BufferTooSmall);
+        }
+
+        self.framed.resize(encoded_len, 0);
+        let used = cobs::encode(self.raw.as_slice(), self.framed.as_mut_slice());
+        self.framed.truncate(used);
+        self.framed.push(0);
+        Ok(self.framed.as_slice())
+    }
+}
+
+impl Default for BinaryEncoder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(Debug)]
+pub struct BinaryDecoder {
+    decoded: Vec<u8>,
+}
+
+impl BinaryDecoder {
+    pub fn new() -> Self {
+        Self {
+            decoded: Vec::with_capacity(MAX_BINARY_PACKET_LEN),
+        }
     }
 
-    let mut decoded = [0u8; N];
-    let used = cobs::decode(encoded, &mut decoded).map_err(|_| BinaryCodecError::CobsDecode)?;
-    if used < 4 {
-        return Err(BinaryCodecError::Truncated);
-    }
+    pub fn decode_packet(&mut self, packet: &[u8]) -> BinaryCodecResult<WireMessage> {
+        if packet.is_empty() {
+            return Err(BinaryCodecError::Truncated);
+        }
+        if packet.len() > MAX_BINARY_PACKET_LEN {
+            return Err(BinaryCodecError::BufferTooSmall);
+        }
 
-    let payload_len = used - 4;
-    let payload = &decoded[..payload_len];
-    let crc_bytes: [u8; 4] = decoded[payload_len..used]
-        .try_into()
-        .map_err(|_| BinaryCodecError::Truncated)?;
-    let expected_crc = u32::from_le_bytes(crc_bytes);
-    let actual_crc = crc32fast::hash(payload);
-    if expected_crc != actual_crc {
-        return Err(BinaryCodecError::CrcMismatch);
-    }
+        let encoded = if packet.last() == Some(&0) {
+            &packet[..packet.len() - 1]
+        } else {
+            packet
+        };
 
-    postcard::from_bytes(payload).map_err(|_| BinaryCodecError::Postcard)
+        if encoded.is_empty() {
+            return Err(BinaryCodecError::Truncated);
+        }
+
+        self.decoded.clear();
+        self.decoded.resize(encoded.len(), 0);
+        let used = cobs::decode(encoded, self.decoded.as_mut_slice())
+            .map_err(|_| BinaryCodecError::CobsDecode)?;
+        if used < 4 {
+            return Err(BinaryCodecError::Truncated);
+        }
+
+        let payload_len = used - 4;
+        let payload = &self.decoded[..payload_len];
+        let crc_bytes: [u8; 4] = self.decoded[payload_len..used]
+            .try_into()
+            .map_err(|_| BinaryCodecError::Truncated)?;
+        let expected_crc = u32::from_le_bytes(crc_bytes);
+        let actual_crc = crc32fast::hash(payload);
+        if expected_crc != actual_crc {
+            return Err(BinaryCodecError::CrcMismatch);
+        }
+
+        postcard::from_bytes(payload).map_err(|_| BinaryCodecError::Postcard)
+    }
+}
+
+impl Default for BinaryDecoder {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[cfg(feature = "json")]
 pub fn encode_json<const N: usize>(
-    frame: &WireFrame,
+    message: &WireMessage,
 ) -> Result<String, serde_json_core::ser::Error> {
     let mut output = [0u8; N];
-    let written = serde_json_core::to_slice(frame, &mut output)?;
+    let written = serde_json_core::to_slice(message, &mut output)?;
     core::str::from_utf8(&output[..written])
         .map(String::from)
         .map_err(|_| serde_json_core::ser::Error::BufferFull)
 }
 
 #[cfg(feature = "std-json")]
-pub fn decode_json(line: &str) -> Result<WireFrame, serde_json::Error> {
+pub fn decode_json(line: &str) -> Result<WireMessage, serde_json::Error> {
     serde_json::from_str(line)
 }

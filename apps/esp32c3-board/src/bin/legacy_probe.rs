@@ -410,16 +410,16 @@ fn print_probe_snapshot(bus: &mut dyn ImuBus, target: ImuTargetId, label: &str) 
 }
 
 fn select_imu_sample_config(chip_profile: &ImuChipProfile) -> ImuSampleConfig {
-    let sample_config_options = &chip_profile.sample_config_options;
+    let sample_config_capability = &chip_profile.sample_config_capability;
     let preferred = ImuSampleConfig {
         accel_range: RangeG(8),
         gyro_range: RangeDps(500),
         sample_rate_hz: SampleRateHz(100),
     };
 
-    sample_config_options
+    sample_config_capability
         .contains(&preferred)
         .then_some(preferred)
-        .or_else(|| sample_config_options.first_config())
+        .or_else(|| sample_config_capability.first_config())
         .unwrap_or(preferred)
 }

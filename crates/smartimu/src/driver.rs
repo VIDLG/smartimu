@@ -1,10 +1,10 @@
 use crate::bus::{ImuBus, ImuTargetId};
 use crate::delay_ms;
 use crate::error::{SmartImuError, UnsupportedConfigReason};
-use crate::sample::{RawImu6, RawImuSample, SampleReadoutRequest};
+use crate::protocol::SampleReadoutRequest;
+use crate::sample::{RawImu6, RawImuSample};
 use crate::types::{
-    DetectedChipInfo, ImuChipProfile, ImuId, ImuIdentity, ImuSampleConfig, SampleConfigOptions,
-    SampleReadoutSupport,
+    DetectedChipInfo, ImuChipProfile, ImuId, ImuIdentity, ImuSampleConfig, SampleConfigCapability,
 };
 use alloc::boxed::Box;
 use async_trait::async_trait;
@@ -222,16 +222,20 @@ pub trait ImuDriver: Sync {
         request: SampleReadoutRequest,
     ) -> Result<RawImuSample, SmartImuError> {
         let info = self.info();
-        ensure_sample_readout_supported(info.chip_profile.sample_readout_support, request)?;
+        ensure_sample_readout_allowed(
+            info.chip_profile.sensor_timestamp,
+            info.chip_profile.temperature_scale.as_ref(),
+            request,
+        )?;
         info.sample_readout.read(bus, target).await
     }
 }
 
-pub fn ensure_sample_config_supported(
-    sample_config_options: &SampleConfigOptions,
+pub fn ensure_sample_config_allowed(
+    sample_config_capability: &SampleConfigCapability,
     config: &ImuSampleConfig,
 ) -> Result<(), SmartImuError> {
-    if sample_config_options.contains(config) {
+    if sample_config_capability.contains(config) {
         Ok(())
     } else {
         Err(SmartImuError::UnsupportedConfig(
@@ -240,16 +244,17 @@ pub fn ensure_sample_config_supported(
     }
 }
 
-pub fn ensure_sample_readout_supported(
-    support: SampleReadoutSupport,
+pub fn ensure_sample_readout_allowed(
+    sensor_timestamp: bool,
+    temperature_scale: Option<&crate::TemperatureScale>,
     request: SampleReadoutRequest,
 ) -> Result<(), SmartImuError> {
-    if request.temperature && !support.temperature {
+    if request.temperature && temperature_scale.is_none() {
         return Err(SmartImuError::UnsupportedConfig(
             UnsupportedConfigReason::TemperatureReadout,
         ));
     }
-    if request.sensor_timestamp && !support.sensor_timestamp {
+    if request.sensor_timestamp && !sensor_timestamp {
         return Err(SmartImuError::UnsupportedConfig(
             UnsupportedConfigReason::SensorTimestampReadout,
         ));

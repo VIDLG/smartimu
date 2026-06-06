@@ -20,7 +20,7 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{Window, WindowAttributes, WindowId};
 
 use crate::render::{Renderer, SceneStats};
-use crate::replay::{ReplayClock, find_default_replay_path, load_replay_frames};
+use crate::replay::{ReplayClock, find_default_replay_path, load_replay_messages};
 use crate::serial::{InputMode, SerialConnection, SerialEvent, available_ports, connect};
 use crate::state::{PlaybackState, ViewerState};
 use crate::ui::{UiAction, UiStatus};
@@ -210,7 +210,7 @@ struct App {
     egui_state: Option<EguiWinitState>,
     state: ViewerState,
     playback_state: PlaybackState,
-    replay_frames: Vec<smartimu::DeviceFrame>,
+    replay_messages: Vec<smartimu::DeviceMessage>,
     replay_cursor: usize,
     replay_clock: Option<ReplayClock>,
     replay_path: Option<PathBuf>,
@@ -235,7 +235,7 @@ impl Default for App {
             egui_state: None,
             state: ViewerState::default(),
             playback_state: PlaybackState::Playing,
-            replay_frames: Vec::new(),
+            replay_messages: Vec::new(),
             replay_cursor: 0,
             replay_clock: None,
             replay_path: None,
@@ -376,7 +376,7 @@ impl App {
                     playback_state: self.playback_state,
                     replay_path: self.replay_path.as_deref(),
                     replay_cursor: self.replay_cursor,
-                    replay_len: self.replay_frames.len(),
+                    replay_len: self.replay_messages.len(),
                     status: &self.status,
                     fps: self.frames.fps,
                     frame_time: self.frames.frame_time,
@@ -456,7 +456,7 @@ impl App {
         }
         for event in events {
             match event {
-                SerialEvent::Frame(frame) => self.state.handle_frame(frame),
+                SerialEvent::Message(frame) => self.state.handle_message(frame),
                 SerialEvent::Status(status) => {
                     self.push_serial_log(format!("[status] {}", status));
                     self.status = status;
@@ -477,7 +477,7 @@ impl App {
 
     fn reload_replay(&mut self) {
         self.serial = None;
-        self.replay_frames.clear();
+        self.replay_messages.clear();
         self.replay_cursor = 0;
         self.replay_clock = None;
         self.state.clear();
@@ -488,12 +488,12 @@ impl App {
             self.status = String::from("no jsonl replay found in workspace root");
             return;
         };
-        match load_replay_frames(&path) {
+        match load_replay_messages(&path) {
             Ok(frames) => {
                 self.replay_path = Some(path);
-                self.replay_frames = frames;
+                self.replay_messages = frames;
                 self.playback_state = PlaybackState::Playing;
-                self.status = format!("playing {} replay frames", self.replay_frames.len());
+                self.status = format!("playing {} replay messages", self.replay_messages.len());
                 self.rearm_replay_clock();
             }
             Err(error) => {
@@ -506,7 +506,7 @@ impl App {
 
     fn rearm_replay_clock(&mut self) {
         self.replay_clock = self
-            .replay_frames
+            .replay_messages
             .get(self.replay_cursor)
             .map(ReplayClock::new);
     }
@@ -528,16 +528,16 @@ impl App {
         let Some(clock) = self.replay_clock else {
             return;
         };
-        while let Some(frame) = self.replay_frames.get(self.replay_cursor) {
+        while let Some(frame) = self.replay_messages.get(self.replay_cursor) {
             if !clock.due(frame) {
                 break;
             }
             let frame = frame.clone();
             self.replay_cursor += 1;
-            self.state.handle_frame(frame);
+            self.state.handle_message(frame);
         }
 
-        if self.replay_cursor >= self.replay_frames.len() {
+        if self.replay_cursor >= self.replay_messages.len() {
             self.playback_state = PlaybackState::Paused;
             self.replay_clock = None;
             self.status = String::from("paused at end of replay");
@@ -546,24 +546,24 @@ impl App {
                 "{} replay ({}/{})",
                 self.playback_state.label(),
                 self.replay_cursor,
-                self.replay_frames.len()
+                self.replay_messages.len()
             );
         }
     }
 
     fn step_one_frame(&mut self) {
         self.playback_state = PlaybackState::Paused;
-        if self.replay_cursor >= self.replay_frames.len() {
+        if self.replay_cursor >= self.replay_messages.len() {
             self.status = String::from("paused at end of replay");
             return;
         }
-        let frame = self.replay_frames[self.replay_cursor].clone();
+        let frame = self.replay_messages[self.replay_cursor].clone();
         self.replay_cursor += 1;
-        self.state.handle_frame(frame);
+        self.state.handle_message(frame);
         self.status = format!(
             "paused stepping ({}/{})",
             self.replay_cursor,
-            self.replay_frames.len()
+            self.replay_messages.len()
         );
     }
 
@@ -577,14 +577,14 @@ impl App {
         self.replay_cursor = 0;
         self.state.clear();
         while self.replay_cursor < target {
-            let frame = self.replay_frames[self.replay_cursor].clone();
+            let frame = self.replay_messages[self.replay_cursor].clone();
             self.replay_cursor += 1;
-            self.state.handle_frame(frame);
+            self.state.handle_message(frame);
         }
         self.status = format!(
             "paused stepping ({}/{})",
             self.replay_cursor,
-            self.replay_frames.len()
+            self.replay_messages.len()
         );
     }
 }

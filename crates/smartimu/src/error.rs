@@ -18,6 +18,8 @@ pub enum SmartImuError {
     CommunicationError,
     #[error("chip not found")]
     ChipNotFound,
+    #[error("IMU not found")]
+    ImuNotFound,
     #[error("configuration error")]
     ConfigError,
     #[error("data not ready")]

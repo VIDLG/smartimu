@@ -1,7 +1,10 @@
 use crate::{
-    BusInfo, DeviceFrame, DeviceHeader, ErrorFrame, HeartbeatFrame, ImuChip, ImuId, ImuNodeInfo,
-    ImuNodeInfoFrame, InventoryFrame, MAX_MESSAGE_LEN, PROTOCOL_VERSION, PingFrame, ProbeResult,
-    ProbeResultFrame, RawImuSample, SampleFrame, SmartImuError, SystemInfo, WireFormat,
+    BusInfo, DeviceEvent, DeviceHeader, DeviceMessage, DeviceResponse, ErrorEvent, HeartbeatEvent,
+    ImuId, ImuNodeInfo, ImuNodeInfoPayload, ImuNodeInfoResponse, InventoryPayload,
+    InventoryResponse, MAX_MESSAGE_LEN, PROTOCOL_VERSION, PongPayload, PongResponse,
+    ProbeDetectedEvent, ProbeDetectedPayload, ProtocolError, RawImuSample, RawSampleEvent,
+    RawSamplePayload, ResponseResult, SmartImuError, StartSamplingPayload, StartSamplingResponse,
+    StopSamplingPayload, StopSamplingResponse, SystemInfo, WireFormat,
 };
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
@@ -23,113 +26,157 @@ impl SessionRuntime {
         }
     }
 
-    pub fn header(&mut self, emit_timestamp_us: u64) -> DeviceHeader {
+    pub fn header(&mut self, timestamp_us: u64) -> DeviceHeader {
         let header = DeviceHeader {
             protocol_version: PROTOCOL_VERSION,
             format: self.format,
             system_id: self.system_id,
             session_id: self.session_id,
             seq: self.seq,
-            emit_timestamp_us,
+            timestamp_us,
         };
         self.seq = self.seq.wrapping_add(1);
         header
     }
 
-    pub fn ping(&mut self, emit_timestamp_us: u64, message: &str) -> DeviceFrame {
-        DeviceFrame::Ping(PingFrame {
-            header: self.header(emit_timestamp_us),
-            message: bounded_string(message, crate::MAX_MESSAGE_LEN),
-        })
+    pub fn pong(&mut self, timestamp_us: u64, message: &str) -> DeviceMessage {
+        DeviceMessage::Response(DeviceResponse::Pong(PongResponse {
+            header: self.header(timestamp_us),
+            result: ResponseResult::Ok(PongPayload {
+                message: bounded_string(message, crate::MAX_MESSAGE_LEN),
+            }),
+        }))
     }
 
-    pub fn inventory(
+    pub fn inventory_response(
         &mut self,
-        emit_timestamp_us: u64,
+        timestamp_us: u64,
         system_label: &str,
         buses: Vec<BusInfo>,
         imus: Vec<ImuNodeInfo>,
-    ) -> DeviceFrame {
-        DeviceFrame::Inventory(InventoryFrame {
-            header: self.header(emit_timestamp_us),
-            system: SystemInfo {
-                system_id: self.system_id,
-                label: bounded_string(system_label, crate::MAX_LABEL_LEN),
+    ) -> DeviceMessage {
+        DeviceMessage::Response(DeviceResponse::Inventory(InventoryResponse {
+            header: self.header(timestamp_us),
+            result: ResponseResult::Ok(InventoryPayload {
+                system: SystemInfo {
+                    system_id: self.system_id,
+                    label: bounded_string(system_label, crate::MAX_LABEL_LEN),
+                },
+                buses,
+                imus,
+            }),
+        }))
+    }
+
+    pub fn imu_node_info_response(
+        &mut self,
+        timestamp_us: u64,
+        imu_id: ImuId,
+        info: ImuNodeInfo,
+    ) -> DeviceMessage {
+        DeviceMessage::Response(DeviceResponse::ImuNodeInfo(ImuNodeInfoResponse {
+            header: self.header(timestamp_us),
+            result: ResponseResult::Ok(ImuNodeInfoPayload { imu_id, info }),
+        }))
+    }
+
+    pub fn imu_node_info_not_found_response(
+        &mut self,
+        timestamp_us: u64,
+        _imu_id: ImuId,
+    ) -> DeviceMessage {
+        DeviceMessage::Response(DeviceResponse::ImuNodeInfo(ImuNodeInfoResponse {
+            header: self.header(timestamp_us),
+            result: ResponseResult::Err(ProtocolError {
+                imu_id: Some(_imu_id),
+                error: SmartImuError::ImuNotFound,
+                message: bounded_string("IMU node info not found", MAX_MESSAGE_LEN),
+            }),
+        }))
+    }
+
+    pub fn start_sampling_response(
+        &mut self,
+        timestamp_us: u64,
+        imu_ids: Vec<ImuId>,
+    ) -> DeviceMessage {
+        DeviceMessage::Response(DeviceResponse::StartSampling(StartSamplingResponse {
+            header: self.header(timestamp_us),
+            result: ResponseResult::Ok(StartSamplingPayload { imu_ids }),
+        }))
+    }
+
+    pub fn stop_sampling_response(
+        &mut self,
+        timestamp_us: u64,
+        imu_ids: Vec<ImuId>,
+    ) -> DeviceMessage {
+        DeviceMessage::Response(DeviceResponse::StopSampling(StopSamplingResponse {
+            header: self.header(timestamp_us),
+            result: ResponseResult::Ok(StopSamplingPayload { imu_ids }),
+        }))
+    }
+
+    pub fn probe_detected(
+        &mut self,
+        timestamp_us: u64,
+        imu_id: ImuId,
+        driver_id: &str,
+        spi_profile: crate::SpiProfile,
+        chip_info: crate::DetectedChipInfo,
+    ) -> DeviceMessage {
+        DeviceMessage::Event(DeviceEvent::ProbeDetected(ProbeDetectedEvent {
+            header: self.header(timestamp_us),
+            payload: ProbeDetectedPayload {
+                imu_id,
+                driver_id: bounded_string(driver_id, crate::MAX_LABEL_LEN),
+                spi_profile,
+                chip_info,
             },
-            buses,
-            imus,
-        })
+        }))
     }
 
-    pub fn imu_info(
+    pub fn raw_sample(
         &mut self,
-        emit_timestamp_us: u64,
+        timestamp_us: u64,
         imu_id: ImuId,
-        info: Option<ImuNodeInfo>,
-    ) -> DeviceFrame {
-        DeviceFrame::ImuNodeInfo(ImuNodeInfoFrame {
-            header: self.header(emit_timestamp_us),
-            imu_id,
-            info,
-        })
-    }
-
-    pub fn probe_result(
-        &mut self,
-        emit_timestamp_us: u64,
-        imu_id: ImuId,
-        probe_label: &str,
-        result: ProbeResult,
-    ) -> DeviceFrame {
-        DeviceFrame::ProbeResult(ProbeResultFrame {
-            header: self.header(emit_timestamp_us),
-            imu_id,
-            probe_label: bounded_string(probe_label, crate::MAX_LABEL_LEN),
-            result,
-        })
-    }
-
-    pub fn sample(
-        &mut self,
-        emit_timestamp_us: u64,
-        imu_id: ImuId,
-        imu_chip: ImuChip,
         sample_index: u32,
         sample_timestamp_us: u64,
         sample: RawImuSample,
-        status_bits: u16,
-    ) -> DeviceFrame {
-        DeviceFrame::Sample(SampleFrame {
-            header: self.header(emit_timestamp_us),
-            imu_id,
-            imu_chip,
-            sample_index,
-            sample_timestamp_us,
-            sample,
-            status_bits,
-        })
+    ) -> DeviceMessage {
+        DeviceMessage::Event(DeviceEvent::RawSample(RawSampleEvent {
+            header: self.header(timestamp_us),
+            payload: RawSamplePayload {
+                imu_id,
+                sample_index,
+                timestamp_us: sample_timestamp_us,
+                sample,
+            },
+        }))
     }
 
     pub fn error(
         &mut self,
-        emit_timestamp_us: u64,
+        timestamp_us: u64,
         imu_id: Option<ImuId>,
         error: SmartImuError,
         message: &str,
-    ) -> DeviceFrame {
-        DeviceFrame::Error(ErrorFrame {
-            header: self.header(emit_timestamp_us),
-            imu_id,
-            error,
-            message: bounded_string(message, MAX_MESSAGE_LEN),
-        })
+    ) -> DeviceMessage {
+        DeviceMessage::Event(DeviceEvent::Error(ErrorEvent {
+            header: self.header(timestamp_us),
+            payload: ProtocolError {
+                imu_id,
+                error,
+                message: bounded_string(message, MAX_MESSAGE_LEN),
+            },
+        }))
     }
 
-    pub fn heartbeat(&mut self, emit_timestamp_us: u64, active_imus: u16) -> DeviceFrame {
-        DeviceFrame::Heartbeat(HeartbeatFrame {
-            header: self.header(emit_timestamp_us),
-            active_imus,
-        })
+    pub fn heartbeat(&mut self, timestamp_us: u64, active_imu_ids: Vec<ImuId>) -> DeviceMessage {
+        DeviceMessage::Event(DeviceEvent::Heartbeat(HeartbeatEvent {
+            header: self.header(timestamp_us),
+            payload: crate::HeartbeatPayload { active_imu_ids },
+        }))
     }
 }
 

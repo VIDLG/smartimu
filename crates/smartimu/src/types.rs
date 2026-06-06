@@ -56,10 +56,10 @@ pub struct ImuSampleConfig {
     pub sample_rate_hz: SampleRateHz,
 }
 
-/// Six-axis sampling support can be independent options or explicitly
+/// Six-axis sample configuration capability can be independent dimensions or explicitly
 /// constrained valid tuples.
 ///
-/// Current implemented support:
+/// Current implemented capabilities:
 /// - ICM-42688-HXY: independent accel 4/8/16 g, gyro 250/500/1000/2000 dps, 100 Hz.
 /// - SC7I22/SC7U22: independent accel 4/8/16 g, gyro 250/500/1000 dps, 100 Hz.
 /// - ICM-42688-PC: independent accel 2 g, gyro 2048 dps, 100 Hz.
@@ -68,7 +68,7 @@ pub struct ImuSampleConfig {
 /// Temperature is intentionally modeled separately because most IMU
 /// temperature channels do not share the accel/gyro range and ODR choices.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum SampleConfigOptions {
+pub enum SampleConfigCapability {
     Independent {
         accel_ranges: Cow<'static, [RangeG]>,
         gyro_ranges: Cow<'static, [RangeDps]>,
@@ -79,7 +79,7 @@ pub enum SampleConfigOptions {
     },
 }
 
-impl SampleConfigOptions {
+impl SampleConfigCapability {
     pub fn contains(&self, config: &ImuSampleConfig) -> bool {
         match self {
             Self::Independent {
@@ -111,24 +111,12 @@ impl SampleConfigOptions {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct TemperatureConfig {
-    pub enabled: bool,
-    pub scale: TemperatureScale,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SampleReadoutSupport {
-    pub temperature: bool,
-    pub sensor_timestamp: bool,
-}
-
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ImuChipProfile {
     pub chip: ImuChip,
-    pub sample_config_options: SampleConfigOptions,
-    pub sample_readout_support: SampleReadoutSupport,
-    pub temperature_config: Option<TemperatureConfig>,
+    pub sample_config_capability: SampleConfigCapability,
+    pub sensor_timestamp: bool,
+    pub temperature_scale: Option<TemperatureScale>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

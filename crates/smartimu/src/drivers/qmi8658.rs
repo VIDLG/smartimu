@@ -36,16 +36,13 @@ const PROBE_MATCHES: &[ProbeRegisterMatch] = &[
 
 pub static CHIP_PROFILE: ImuChipProfile = ImuChipProfile {
     chip: ImuChip::Qmi8658A,
-    sample_config_options: crate::SampleConfigOptions::Independent {
+    sample_config_capability: crate::SampleConfigCapability::Independent {
         accel_ranges: Cow::Borrowed(ACCEL_RANGES),
         gyro_ranges: Cow::Borrowed(GYRO_RANGES),
         sample_rates: Cow::Borrowed(SAMPLE_RATES),
     },
-    sample_readout_support: crate::SampleReadoutSupport {
-        temperature: false,
-        sensor_timestamp: false,
-    },
-    temperature_config: None,
+    sensor_timestamp: false,
+    temperature_scale: None,
 };
 
 pub static DRIVER: Qmi8658Driver = Qmi8658Driver;
@@ -95,7 +92,7 @@ impl ImuDriver for Qmi8658Driver {
         target: ImuTargetId,
         config: &ImuSampleConfig,
     ) -> Result<(), SmartImuError> {
-        crate::ensure_sample_config_supported(&INFO.chip_profile.sample_config_options, config)?;
+        crate::ensure_sample_config_allowed(&INFO.chip_profile.sample_config_capability, config)?;
 
         // Apply the board-validated startup preset for output rate, ranges, and data path.
         bus.write_reg(target, REG_CTRL1, 0x20)?;

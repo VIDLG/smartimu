@@ -25,19 +25,19 @@ pub mod platform;
 pub use bus::{ImuBus, ImuTargetId, SpiMode, SpiProfile, Turnaround};
 pub use driver::{
     DataReadyCondition, DataReadyStatus, DriverInfo, ImuDriver, ImuTargetInfo, ProbeRegisterMatch,
-    ProbeRegisterReadout, SampleByteOrder, SampleRegisterReadout, ensure_sample_config_supported,
-    ensure_sample_readout_supported,
+    ProbeRegisterReadout, SampleByteOrder, SampleRegisterReadout, ensure_sample_config_allowed,
+    ensure_sample_readout_allowed,
 };
 pub use error::{SmartImuError, SmartImuResult, UnsupportedConfigReason};
 pub use protocol::*;
 pub use sample::{
     Imu6Scale, ImuSampleScale, PhysicalImu6, PhysicalImuSample, PhysicalTemperature, RawImu6,
-    RawImuSample, RawTemperature, SampleReadoutRequest, SensorTimestamp,
+    RawImuSample, RawTemperature, SensorTimestamp,
 };
 pub use types::{
     BusId, BusInfo, DetectedChipInfo, ImuChip, ImuChipProfile, ImuId, ImuIdentity, ImuNodeInfo,
-    ImuSampleConfig, Quaternion, RangeDps, RangeG, SampleConfigOptions, SampleRateHz,
-    SampleReadoutSupport, SystemInfo, TemperatureConfig, TemperatureScale,
+    ImuSampleConfig, Quaternion, RangeDps, RangeG, SampleConfigCapability, SampleRateHz,
+    SystemInfo, TemperatureScale,
 };
 
 pub use delay::delay_ms;

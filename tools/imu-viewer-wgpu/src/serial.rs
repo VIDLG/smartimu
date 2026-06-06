@@ -3,7 +3,7 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
-use smartimu::{DeviceFrame, WireFrame, decode_binary_packet, decode_json};
+use smartimu::{BinaryDecoder, DeviceMessage, WireMessage, decode_json};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InputMode {
@@ -23,7 +23,7 @@ impl InputMode {
 }
 
 pub enum SerialEvent {
-    Frame(DeviceFrame),
+    Message(DeviceMessage),
     Status(String),
     RawLine(String),
 }
@@ -93,6 +93,7 @@ pub fn connect(port_name: String, baud_rate: u32, input_mode: InputMode) -> Seri
         let mut chunk = [0u8; 256];
         let mut line = Vec::<u8>::new();
         let mut packet = Vec::<u8>::new();
+        let mut binary_decoder = BinaryDecoder::new();
         let mut detected = input_mode;
         let mut saw_frame = false;
         let mut idle_count = 0u32;
@@ -103,7 +104,7 @@ pub fn connect(port_name: String, baud_rate: u32, input_mode: InputMode) -> Seri
                     idle_count = idle_count.saturating_add(1);
                     if idle_count == 20 && !saw_frame {
                         let _ = tx.send(SerialEvent::Status(String::from(
-                            "opened port, waiting for valid frames",
+                            "opened port, waiting for valid messages",
                         )));
                     }
                 }
@@ -117,7 +118,7 @@ pub fn connect(port_name: String, baud_rate: u32, input_mode: InputMode) -> Seri
                                         saw_frame = true;
                                         let _ = tx
                                             .send(SerialEvent::Status(String::from("json stream")));
-                                        if tx.send(SerialEvent::Frame(frame)).is_err() {
+                                        if tx.send(SerialEvent::Message(frame)).is_err() {
                                             return;
                                         }
                                     } else if let Some(line) = raw_text_line(&line) {
@@ -131,12 +132,14 @@ pub fn connect(port_name: String, baud_rate: u32, input_mode: InputMode) -> Seri
                             InputMode::Binary => {
                                 if *byte == 0 {
                                     packet.push(0);
-                                    if let Some(frame) = parse_binary_packet(&packet) {
+                                    if let Some(frame) =
+                                        parse_binary_packet(&mut binary_decoder, &packet)
+                                    {
                                         saw_frame = true;
                                         let _ = tx.send(SerialEvent::Status(String::from(
                                             "binary stream",
                                         )));
-                                        if tx.send(SerialEvent::Frame(frame)).is_err() {
+                                        if tx.send(SerialEvent::Message(frame)).is_err() {
                                             return;
                                         }
                                     }
@@ -153,7 +156,7 @@ pub fn connect(port_name: String, baud_rate: u32, input_mode: InputMode) -> Seri
                                         let _ = tx.send(SerialEvent::Status(String::from(
                                             "auto -> json",
                                         )));
-                                        if tx.send(SerialEvent::Frame(frame)).is_err() {
+                                        if tx.send(SerialEvent::Message(frame)).is_err() {
                                             return;
                                         }
                                     } else if let Some(line) = raw_text_line(&line) {
@@ -162,13 +165,15 @@ pub fn connect(port_name: String, baud_rate: u32, input_mode: InputMode) -> Seri
                                     line.clear();
                                 } else if *byte == 0 {
                                     packet.push(0);
-                                    if let Some(frame) = parse_binary_packet(&packet) {
+                                    if let Some(frame) =
+                                        parse_binary_packet(&mut binary_decoder, &packet)
+                                    {
                                         detected = InputMode::Binary;
                                         saw_frame = true;
                                         let _ = tx.send(SerialEvent::Status(String::from(
                                             "auto -> binary",
                                         )));
-                                        if tx.send(SerialEvent::Frame(frame)).is_err() {
+                                        if tx.send(SerialEvent::Message(frame)).is_err() {
                                             return;
                                         }
                                     }
@@ -271,11 +276,11 @@ fn spawn_powershell_serial_reader(
                 )));
                 continue;
             }
-            if let Some(frame) = decode_json(trimmed).ok().and_then(wire_to_device) {
+            if let Some(frame) = decode_json(trimmed).ok().and_then(wire_to_device_message) {
                 let _ = tx.send(SerialEvent::Status(String::from(
                     "json stream (powershell)",
                 )));
-                if tx.send(SerialEvent::Frame(frame)).is_err() {
+                if tx.send(SerialEvent::Message(frame)).is_err() {
                     break;
                 }
             } else {
@@ -331,7 +336,7 @@ fn normalize_serial_port_name(port_name: &str) -> String {
     port_name.to_string()
 }
 
-fn parse_json_line(buffer: &[u8]) -> Option<DeviceFrame> {
+fn parse_json_line(buffer: &[u8]) -> Option<DeviceMessage> {
     let line = std::str::from_utf8(buffer).ok()?.trim();
     if line.is_empty() {
         return None;
@@ -339,19 +344,20 @@ fn parse_json_line(buffer: &[u8]) -> Option<DeviceFrame> {
     let json_start = line.find('{')?;
     decode_json(line[json_start..].trim())
         .ok()
-        .and_then(wire_to_device)
+        .and_then(wire_to_device_message)
 }
 
-fn parse_binary_packet(buffer: &[u8]) -> Option<DeviceFrame> {
-    decode_binary_packet::<1024>(buffer)
+fn parse_binary_packet(decoder: &mut BinaryDecoder, buffer: &[u8]) -> Option<DeviceMessage> {
+    decoder
+        .decode_packet(buffer)
         .ok()
-        .and_then(wire_to_device)
+        .and_then(wire_to_device_message)
 }
 
-fn wire_to_device(frame: WireFrame) -> Option<DeviceFrame> {
+fn wire_to_device_message(frame: WireMessage) -> Option<DeviceMessage> {
     match frame {
-        WireFrame::Device(frame) => Some(frame),
-        WireFrame::Host(_) => None,
+        WireMessage::Device(frame) => Some(frame),
+        WireMessage::Host(_) => None,
     }
 }
 

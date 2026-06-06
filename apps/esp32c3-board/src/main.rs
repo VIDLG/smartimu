@@ -22,9 +22,10 @@ use esp_println::println;
 use smartimu::EspImuBus;
 use smartimu::fusion::{FusionFilter, FusionFilterSettings};
 use smartimu::{
-    BusInfo, ImuBus, ImuChip, ImuChipProfile, ImuDriver, ImuNodeInfo, ImuSampleConfig,
-    OrientationFrame, ProbePlan, RangeDps, RangeG, SampleRateHz, SessionRuntime, SpiProfile,
-    Turnaround, WireFormat, bounded_string, encode_binary_packet, encode_json, probe,
+    BinaryEncoder, BusInfo, DeviceEvent, DeviceMessage, ImuBus, ImuChip, ImuChipProfile, ImuDriver,
+    ImuNodeInfo, ImuSampleConfig, OrientationEvent, OrientationPayload, ProbePlan, RangeDps,
+    RangeG, SampleRateHz, SessionRuntime, SpiProfile, Turnaround, WireFormat, bounded_string,
+    encode_json, probe,
 };
 
 #[panic_handler]
@@ -67,11 +68,16 @@ impl ImuRuntime {
 struct Transport<'d> {
     usb: Option<UsbSerialJtag<'d, esp_hal::Blocking>>,
     mode: board::TransportMode,
+    binary_encoder: BinaryEncoder,
 }
 
 impl<'d> Transport<'d> {
     fn new(usb: Option<UsbSerialJtag<'d, esp_hal::Blocking>>, mode: board::TransportMode) -> Self {
-        Self { usb, mode }
+        Self {
+            usb,
+            mode,
+            binary_encoder: BinaryEncoder::new(),
+        }
     }
 
     fn format(&self) -> WireFormat {
@@ -81,35 +87,37 @@ impl<'d> Transport<'d> {
         }
     }
 
-    fn emit_frame(&mut self, frame: &smartimu::DeviceFrame) {
-        let wire_frame = smartimu::WireFrame::Device(frame.clone());
+    fn emit_message(&mut self, message: &smartimu::DeviceMessage) {
+        let wire_message = smartimu::WireMessage::Device(message.clone());
         match self.mode {
-            board::TransportMode::Json => match encode_json::<768>(&wire_frame) {
+            board::TransportMode::Json => match encode_json::<768>(&wire_message) {
                 Ok(line) => {
                     println!("{}", line);
                 }
                 Err(_) => {}
             },
-            board::TransportMode::Binary => match encode_binary_packet::<1024>(&wire_frame) {
-                Ok(packet) => {
-                    let _ = self.write_all(packet.as_slice());
+            board::TransportMode::Binary => {
+                let Some(usb) = self.usb.as_mut() else {
+                    return;
+                };
+                match self.binary_encoder.encode_packet(&wire_message) {
+                    Ok(packet) => {
+                        let _ = write_all(usb, packet);
+                    }
+                    Err(_) => {}
                 }
-                Err(_) => {}
-            },
+            }
         }
     }
+}
 
-    fn write_all(&mut self, mut data: &[u8]) -> Result<(), ()> {
-        let Some(usb) = self.usb.as_mut() else {
-            return Err(());
-        };
-        while !data.is_empty() {
-            usb.write(data).map_err(|_| ())?;
-            usb.flush_tx().map_err(|_| ())?;
-            data = &[];
-        }
-        Ok(())
+fn write_all(usb: &mut UsbSerialJtag<'_, esp_hal::Blocking>, mut data: &[u8]) -> Result<(), ()> {
+    while !data.is_empty() {
+        usb.write(data).map_err(|_| ())?;
+        usb.flush_tx().map_err(|_| ())?;
+        data = &[];
     }
+    Ok(())
 }
 
 #[esp_rtos::main]
@@ -164,7 +172,7 @@ async fn main(_spawner: Spawner) -> ! {
 
     Timer::after_millis(board::POWER_UP_DELAY_MS).await;
 
-    transport.emit_frame(&session.ping(emit_timestamp_us(boot), "ping"));
+    transport.emit_message(&session.pong(device_timestamp_us(boot), "pong"));
 
     for runtime in &mut runtimes {
         match probe(
@@ -209,22 +217,16 @@ async fn main(_spawner: Spawner) -> ! {
                         fusion_settings.gyroscope_range_dps = sample_config.gyro_range.0 as f32;
                         runtime.fusion = Some(FusionFilter::new(fusion_settings));
                         runtime.last_orientation_timestamp_us = None;
-                        transport.emit_frame(&session.probe_result(
-                            emit_timestamp_us(boot),
+                        transport.emit_message(&session.probe_detected(
+                            device_timestamp_us(boot),
                             runtime.config.imu_id,
                             runtime.detected.as_ref().unwrap().name,
-                            smartimu::ProbeResult::Detected {
-                                driver_id: smartimu::bounded_string(
-                                    runtime.detected.as_ref().unwrap().name,
-                                    smartimu::MAX_LABEL_LEN,
-                                ),
-                                chip: chip_profile.chip,
-                                profile,
-                            },
+                            profile,
+                            probe_match.info.clone(),
                         ));
                         if chip_profile.chip != runtime.config.expected {
-                            transport.emit_frame(&session.error(
-                                emit_timestamp_us(boot),
+                            transport.emit_message(&session.error(
+                                device_timestamp_us(boot),
                                 Some(runtime.config.imu_id),
                                 smartimu::SmartImuError::ChipNotFound,
                                 "detected chip mismatches expected chip",
@@ -232,32 +234,26 @@ async fn main(_spawner: Spawner) -> ! {
                         }
                     }
                     Err(error) => {
-                        transport.emit_frame(&session.probe_result(
-                            emit_timestamp_us(boot),
-                            runtime.config.imu_id,
-                            "probe-match",
-                            smartimu::ProbeResult::Failed { error },
+                        transport.emit_message(&session.error(
+                            device_timestamp_us(boot),
+                            Some(runtime.config.imu_id),
+                            error,
+                            "probe match configuration failed",
                         ));
                     }
                 }
             }
             Ok(None) => {
-                transport.emit_frame(&session.probe_result(
-                    emit_timestamp_us(boot),
-                    runtime.config.imu_id,
-                    "none",
-                    smartimu::ProbeResult::NotDetected,
-                ));
-                transport.emit_frame(&session.error(
-                    emit_timestamp_us(boot),
+                transport.emit_message(&session.error(
+                    device_timestamp_us(boot),
                     Some(runtime.config.imu_id),
                     smartimu::SmartImuError::ChipNotFound,
                     &probe_snapshot(&mut bus, runtime.config.target, runtime.config.expected),
                 ));
             }
             Err(error) => {
-                transport.emit_frame(&session.error(
-                    emit_timestamp_us(boot),
+                transport.emit_message(&session.error(
+                    device_timestamp_us(boot),
                     Some(runtime.config.imu_id),
                     error,
                     "probe error",
@@ -266,24 +262,24 @@ async fn main(_spawner: Spawner) -> ! {
         }
     }
 
-    transport.emit_frame(&session.inventory(
-        emit_timestamp_us(boot),
+    transport.emit_message(&session.inventory_response(
+        device_timestamp_us(boot),
         "esp32c3-board",
         bus_infos(),
         imu_infos(&runtimes),
     ));
 
     loop {
-        let mut active_imus = 0u16;
+        let mut active_imu_ids = Vec::new();
         for runtime in &mut runtimes {
             let Some(detected) = runtime.detected.as_ref() else {
                 continue;
             };
-            active_imus += 1;
+            active_imu_ids.push(runtime.config.imu_id);
 
             if let Err(error) = bus.apply_profile(runtime.config.target, detected.profile) {
-                transport.emit_frame(&session.error(
-                    emit_timestamp_us(boot),
+                transport.emit_message(&session.error(
+                    device_timestamp_us(boot),
                     Some(runtime.config.imu_id),
                     error,
                     "profile switch failed",
@@ -303,14 +299,12 @@ async fn main(_spawner: Spawner) -> ! {
                 Ok(raw) => {
                     runtime.sample_index = runtime.sample_index.wrapping_add(1);
                     let sample_timestamp_us = Instant::now().duration_since(boot).as_micros();
-                    transport.emit_frame(&session.sample(
-                        emit_timestamp_us(boot),
+                    transport.emit_message(&session.raw_sample(
+                        device_timestamp_us(boot),
                         runtime.config.imu_id,
-                        detected.chip_profile.chip,
                         runtime.sample_index,
                         sample_timestamp_us,
                         raw,
-                        0x0001,
                     ));
 
                     let scale = smartimu::Imu6Scale::from(detected.sample_config);
@@ -334,21 +328,22 @@ async fn main(_spawner: Spawner) -> ! {
                         };
                         runtime.last_orientation_timestamp_us = Some(sample_timestamp_us);
                         let quaternion = fusion.update_imu(accel_ms2, gyro_rads, dt_s);
-                        transport.emit_frame(&smartimu::DeviceFrame::Orientation(
-                            OrientationFrame {
-                                header: session.header(emit_timestamp_us(boot)),
-                                imu_id: runtime.config.imu_id,
-                                imu_chip: detected.chip_profile.chip,
-                                sample_index: runtime.sample_index,
-                                sample_timestamp_us,
-                                quaternion,
+                        transport.emit_message(&DeviceMessage::Event(DeviceEvent::Orientation(
+                            OrientationEvent {
+                                header: session.header(device_timestamp_us(boot)),
+                                payload: OrientationPayload {
+                                    imu_id: runtime.config.imu_id,
+                                    sample_index: runtime.sample_index,
+                                    timestamp_us: sample_timestamp_us,
+                                    quaternion,
+                                },
                             },
-                        ));
+                        )));
                     }
                 }
                 Err(error) => {
-                    transport.emit_frame(&session.error(
-                        emit_timestamp_us(boot),
+                    transport.emit_message(&session.error(
+                        device_timestamp_us(boot),
                         Some(runtime.config.imu_id),
                         error,
                         "sample error",
@@ -357,12 +352,12 @@ async fn main(_spawner: Spawner) -> ! {
             }
         }
 
-        transport.emit_frame(&session.heartbeat(emit_timestamp_us(boot), active_imus));
+        transport.emit_message(&session.heartbeat(device_timestamp_us(boot), active_imu_ids));
         heartbeat_count = heartbeat_count.wrapping_add(1);
         if heartbeat_count % 20 == 0 {
-            transport.emit_frame(&session.ping(emit_timestamp_us(boot), "ping"));
-            transport.emit_frame(&session.inventory(
-                emit_timestamp_us(boot),
+            transport.emit_message(&session.pong(device_timestamp_us(boot), "pong"));
+            transport.emit_message(&session.inventory_response(
+                device_timestamp_us(boot),
                 "esp32c3-board",
                 bus_infos(),
                 imu_infos(&runtimes),
@@ -377,7 +372,7 @@ fn init_heap() {
     esp_alloc::heap_allocator!(size: 32 * 1024);
 }
 
-fn emit_timestamp_us(boot: Instant) -> u64 {
+fn device_timestamp_us(boot: Instant) -> u64 {
     Instant::now().duration_since(boot).as_micros()
 }
 
@@ -413,17 +408,17 @@ fn imu_infos(runtimes: &[ImuRuntime; 5]) -> Vec<ImuNodeInfo> {
 }
 
 fn select_imu_sample_config(chip_profile: &ImuChipProfile) -> ImuSampleConfig {
-    let sample_config_options = &chip_profile.sample_config_options;
+    let sample_config_capability = &chip_profile.sample_config_capability;
     let preferred = ImuSampleConfig {
         accel_range: RangeG(8),
         gyro_range: RangeDps(500),
         sample_rate_hz: SampleRateHz(100),
     };
 
-    sample_config_options
+    sample_config_capability
         .contains(&preferred)
         .then_some(preferred)
-        .or_else(|| sample_config_options.first_config())
+        .or_else(|| sample_config_capability.first_config())
         .unwrap_or(preferred)
 }
 

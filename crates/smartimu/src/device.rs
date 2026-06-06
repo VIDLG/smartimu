@@ -1,7 +1,8 @@
 use crate::bus::{ImuBus, ImuTargetId, SpiProfile};
 use crate::driver::ImuDriver;
 use crate::error::SmartImuError;
-use crate::sample::{RawImuSample, SampleReadoutRequest};
+use crate::protocol::SampleReadoutRequest;
+use crate::sample::RawImuSample;
 use crate::types::{DetectedChipInfo, ImuNodeInfo, ImuSampleConfig};
 use alloc::string::String;
 

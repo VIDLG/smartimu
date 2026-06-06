@@ -183,8 +183,8 @@ pub fn show(ctx: &Context, state: &mut ViewerState, status: UiStatus<'_>) -> UiA
                 ui.small("no replay loaded");
             }
             ui.separator();
-            ui.label(format!("received frames: {}", state.received_frames));
-            ui.label(format!("active imus: {}", state.active_imus));
+            ui.label(format!("received messages: {}", state.received_frames));
+            ui.label(format!("active imus: {}", state.active_imu_ids.len()));
             ui.label(format!("seq gaps: {}", state.dropped_seq_count));
             ui.label(format!("3D instances: {}", status.instance_count));
             ui.separator();
@@ -221,7 +221,7 @@ pub fn show(ctx: &Context, state: &mut ViewerState, status: UiStatus<'_>) -> UiA
                 ui.separator();
                 ui.label(format!("instances {}", status.instance_count));
                 ui.separator();
-                ui.label(format!("frames {}", state.received_frames));
+                ui.label(format!("messages {}", state.received_frames));
             });
             ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
                 ui.label("GPU scene is drawn behind this overlay");
@@ -248,19 +248,19 @@ pub fn show(ctx: &Context, state: &mut ViewerState, status: UiStatus<'_>) -> UiA
 fn selected_imu_details(ui: &mut egui::Ui, state: &ViewerState, imu_id: ImuId) {
     ui.label(format!("imu id: {}/{}", imu_id.system_id, imu_id.sensor_id));
     if let Some(orientation) = state.latest_orientation.get(&imu_id) {
-        let q = orientation.quaternion;
+        let q = orientation.payload.quaternion;
         ui.label(format!("qw: {:.4}", q.w));
         ui.label(format!("qx: {:.4}", q.x));
         ui.label(format!("qy: {:.4}", q.y));
         ui.label(format!("qz: {:.4}", q.z));
-        ui.label(format!("sample: {}", orientation.sample_index));
+        ui.label(format!("sample: {}", orientation.payload.sample_index));
     } else {
-        ui.label("no orientation frame yet");
+        ui.label("no orientation message yet");
     }
     if let Some(sample) = state.latest_samples.get(&imu_id) {
         ui.separator();
-        ui.label(format!("accel: {:?}", sample.sample.imu6.accel));
-        ui.label(format!("gyro: {:?}", sample.sample.imu6.gyro));
+        ui.label(format!("accel: {:?}", sample.payload.sample.imu6.accel));
+        ui.label(format!("gyro: {:?}", sample.payload.sample.imu6.gyro));
     }
 }
 

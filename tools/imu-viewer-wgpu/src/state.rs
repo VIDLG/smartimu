@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 
 use smartimu::{
-    DeviceFrame, ImuId, ImuNodeInfo, ImuSampleConfig, OrientationFrame, RangeDps, RangeG,
-    SampleConfigOptions, SampleFrame, SampleRateHz,
+    DeviceEvent, DeviceMessage, DeviceResponse, ImuId, ImuNodeInfo, ImuSampleConfig,
+    OrientationEvent, RangeDps, RangeG, RawSampleEvent, ResponseResult, SampleConfigCapability,
+    SampleRateHz,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -44,13 +45,13 @@ pub struct IntegratedOrientation {
 #[derive(Clone, Debug)]
 pub struct ViewerState {
     pub imu_infos: HashMap<ImuId, ImuNodeInfo>,
-    pub latest_samples: HashMap<ImuId, SampleFrame>,
-    pub latest_orientation: HashMap<ImuId, OrientationFrame>,
-    pub interpolated_orientation: HashMap<ImuId, OrientationFrame>,
+    pub latest_samples: HashMap<ImuId, RawSampleEvent>,
+    pub latest_orientation: HashMap<ImuId, OrientationEvent>,
+    pub interpolated_orientation: HashMap<ImuId, OrientationEvent>,
     pub integrated_orientation: HashMap<ImuId, IntegratedOrientation>,
     pub selected_imu: Option<ImuId>,
     pub view_mode: ViewMode,
-    pub active_imus: u16,
+    pub active_imu_ids: Vec<ImuId>,
     pub last_seq: Option<u32>,
     pub received_frames: u64,
     pub dropped_seq_count: u64,
@@ -66,7 +67,7 @@ impl Default for ViewerState {
             integrated_orientation: HashMap::new(),
             selected_imu: None,
             view_mode: ViewMode::Quaternion,
-            active_imus: 0,
+            active_imu_ids: Vec::new(),
             last_seq: None,
             received_frames: 0,
             dropped_seq_count: 0,
@@ -121,40 +122,56 @@ impl ViewerState {
         self.selected_imu = None;
     }
 
-    pub fn handle_frame(&mut self, frame: DeviceFrame) {
+    pub fn handle_message(&mut self, frame: DeviceMessage) {
         self.received_frames = self.received_frames.wrapping_add(1);
         match frame {
-            DeviceFrame::Ping(frame) => self.update_seq(frame.header.seq),
-            DeviceFrame::Inventory(frame) => {
+            DeviceMessage::Response(response) => self.handle_response(response),
+            DeviceMessage::Event(event) => self.handle_event(event),
+        }
+    }
+
+    fn handle_response(&mut self, response: DeviceResponse) {
+        match response {
+            DeviceResponse::Pong(frame) => self.update_seq(frame.header.seq),
+            DeviceResponse::Inventory(frame) => {
                 self.update_seq(frame.header.seq);
-                self.imu_infos.clear();
-                for info in frame.imus {
-                    self.imu_infos.insert(info.id, info);
+                if let ResponseResult::Ok(payload) = frame.result {
+                    self.imu_infos.clear();
+                    for info in payload.imus {
+                        self.imu_infos.insert(info.id, info);
+                    }
                 }
             }
-            DeviceFrame::ImuNodeInfo(frame) => {
+            DeviceResponse::ImuNodeInfo(frame) => {
                 self.update_seq(frame.header.seq);
-                if let Some(info) = frame.info {
-                    self.imu_infos.insert(info.id, info);
+                if let ResponseResult::Ok(payload) = frame.result {
+                    self.imu_infos.insert(payload.info.id, payload.info);
                 }
             }
-            DeviceFrame::ProbeResult(frame) => self.update_seq(frame.header.seq),
-            DeviceFrame::Sample(frame) => {
+            DeviceResponse::StartSampling(frame) => self.update_seq(frame.header.seq),
+            DeviceResponse::StopSampling(frame) => self.update_seq(frame.header.seq),
+        }
+    }
+
+    fn handle_event(&mut self, event: DeviceEvent) {
+        match event {
+            DeviceEvent::ProbeDetected(frame) => self.update_seq(frame.header.seq),
+            DeviceEvent::RawSample(frame) => {
                 self.update_seq(frame.header.seq);
                 self.update_integrated_orientation(&frame);
                 self.imu_infos
-                    .entry(frame.imu_id)
+                    .entry(frame.payload.imu_id)
                     .or_insert_with(|| synthesize_info(&frame));
-                self.latest_samples.insert(frame.imu_id, frame);
+                self.latest_samples.insert(frame.payload.imu_id, frame);
             }
-            DeviceFrame::Orientation(frame) => {
+            DeviceEvent::Orientation(frame) => {
                 self.update_seq(frame.header.seq);
-                self.latest_orientation.insert(frame.imu_id, frame);
+                self.latest_orientation.insert(frame.payload.imu_id, frame);
             }
-            DeviceFrame::Error(frame) => self.update_seq(frame.header.seq),
-            DeviceFrame::Heartbeat(frame) => {
+            DeviceEvent::Error(frame) => self.update_seq(frame.header.seq),
+            DeviceEvent::Heartbeat(frame) => {
                 self.update_seq(frame.header.seq);
-                self.active_imus = frame.active_imus;
+                self.active_imu_ids = frame.payload.active_imu_ids;
             }
         }
     }
@@ -167,16 +184,21 @@ impl ViewerState {
                 .interpolated_orientation
                 .entry(*imu_id)
                 .or_insert_with(|| current.clone());
-            let before = entry.quaternion;
-            *entry = OrientationFrame {
+            let before = entry.payload.quaternion;
+            *entry = OrientationEvent {
                 header: current.header,
-                imu_id: current.imu_id,
-                imu_chip: current.imu_chip,
-                sample_index: current.sample_index,
-                sample_timestamp_us: current.sample_timestamp_us,
-                quaternion: nlerp_quaternion(entry.quaternion, current.quaternion, 0.35),
+                payload: smartimu::OrientationPayload {
+                    imu_id: current.payload.imu_id,
+                    sample_index: current.payload.sample_index,
+                    timestamp_us: current.payload.timestamp_us,
+                    quaternion: nlerp_quaternion(
+                        entry.payload.quaternion,
+                        current.payload.quaternion,
+                        0.35,
+                    ),
+                },
             };
-            changed |= quaternion_distance(before, entry.quaternion) > 0.000_001;
+            changed |= quaternion_distance(before, entry.payload.quaternion) > 0.000_001;
         }
         changed
     }
@@ -191,34 +213,44 @@ impl ViewerState {
         self.last_seq = Some(seq);
     }
 
-    fn update_integrated_orientation(&mut self, sample: &SampleFrame) {
+    fn update_integrated_orientation(&mut self, sample: &RawSampleEvent) {
         const GYRO_DPS_PER_LSB: f32 = 1.0 / 16.0;
         let state = self
             .integrated_orientation
-            .entry(sample.imu_id)
+            .entry(sample.payload.imu_id)
             .or_default();
         let dt = if let Some(last) = state.last_sample_timestamp_us {
-            ((sample.sample_timestamp_us.saturating_sub(last)) as f32 / 1_000_000.0).clamp(0.0, 0.1)
+            ((sample.payload.timestamp_us.saturating_sub(last)) as f32 / 1_000_000.0)
+                .clamp(0.0, 0.1)
         } else {
             0.0
         };
-        state.last_sample_timestamp_us = Some(sample.sample_timestamp_us);
-        state.roll += (sample.sample.imu6.gyro[0] as f32 * GYRO_DPS_PER_LSB).to_radians() * dt;
-        state.pitch += (sample.sample.imu6.gyro[1] as f32 * GYRO_DPS_PER_LSB).to_radians() * dt;
-        state.yaw += (sample.sample.imu6.gyro[2] as f32 * GYRO_DPS_PER_LSB).to_radians() * dt;
+        state.last_sample_timestamp_us = Some(sample.payload.timestamp_us);
+        state.roll +=
+            (sample.payload.sample.imu6.gyro[0] as f32 * GYRO_DPS_PER_LSB).to_radians() * dt;
+        state.pitch +=
+            (sample.payload.sample.imu6.gyro[1] as f32 * GYRO_DPS_PER_LSB).to_radians() * dt;
+        state.yaw +=
+            (sample.payload.sample.imu6.gyro[2] as f32 * GYRO_DPS_PER_LSB).to_radians() * dt;
     }
 }
 
-pub fn frame_emit_timestamp_us(frame: &DeviceFrame) -> u64 {
+pub fn message_timestamp_us(frame: &DeviceMessage) -> u64 {
     match frame {
-        DeviceFrame::Ping(frame) => frame.header.emit_timestamp_us,
-        DeviceFrame::Inventory(frame) => frame.header.emit_timestamp_us,
-        DeviceFrame::ImuNodeInfo(frame) => frame.header.emit_timestamp_us,
-        DeviceFrame::ProbeResult(frame) => frame.header.emit_timestamp_us,
-        DeviceFrame::Sample(frame) => frame.header.emit_timestamp_us,
-        DeviceFrame::Orientation(frame) => frame.header.emit_timestamp_us,
-        DeviceFrame::Error(frame) => frame.header.emit_timestamp_us,
-        DeviceFrame::Heartbeat(frame) => frame.header.emit_timestamp_us,
+        DeviceMessage::Response(response) => match response {
+            DeviceResponse::Pong(frame) => frame.header.timestamp_us,
+            DeviceResponse::Inventory(frame) => frame.header.timestamp_us,
+            DeviceResponse::ImuNodeInfo(frame) => frame.header.timestamp_us,
+            DeviceResponse::StartSampling(frame) => frame.header.timestamp_us,
+            DeviceResponse::StopSampling(frame) => frame.header.timestamp_us,
+        },
+        DeviceMessage::Event(event) => match event {
+            DeviceEvent::ProbeDetected(frame) => frame.header.timestamp_us,
+            DeviceEvent::RawSample(frame) => frame.header.timestamp_us,
+            DeviceEvent::Orientation(frame) => frame.header.timestamp_us,
+            DeviceEvent::Error(frame) => frame.header.timestamp_us,
+            DeviceEvent::Heartbeat(frame) => frame.header.timestamp_us,
+        },
     }
 }
 
@@ -257,11 +289,11 @@ fn quaternion_distance(a: smartimu::Quaternion, b: smartimu::Quaternion) -> f32 
     dw * dw + dx * dx + dy * dy + dz * dz
 }
 
-fn synthesize_info(sample: &SampleFrame) -> ImuNodeInfo {
+fn synthesize_info(sample: &RawSampleEvent) -> ImuNodeInfo {
     ImuNodeInfo {
-        id: sample.imu_id,
+        id: sample.payload.imu_id,
         bus_id: smartimu::BusId(0),
-        chip_profile: fallback_chip_profile(sample.imu_chip),
+        chip_profile: fallback_chip_profile(smartimu::ImuChip::Icm42688Pc),
         label: None,
         sample_config: fallback_sample_config(),
     }
@@ -275,8 +307,8 @@ fn fallback_sample_config() -> ImuSampleConfig {
     }
 }
 
-fn fallback_sample_config_options() -> SampleConfigOptions {
-    SampleConfigOptions::Constrained {
+fn fallback_sample_config_capability() -> SampleConfigCapability {
+    SampleConfigCapability::Constrained {
         configs: std::borrow::Cow::Owned(vec![fallback_sample_config()]),
     }
 }
@@ -284,8 +316,8 @@ fn fallback_sample_config_options() -> SampleConfigOptions {
 fn fallback_chip_profile(chip: smartimu::ImuChip) -> smartimu::ImuChipProfile {
     smartimu::ImuChipProfile {
         chip,
-        sample_config_options: fallback_sample_config_options(),
-        sample_readout_support: smartimu::SampleReadoutSupport::default(),
-        temperature_config: None,
+        sample_config_capability: fallback_sample_config_capability(),
+        sensor_timestamp: false,
+        temperature_scale: None,
     }
 }

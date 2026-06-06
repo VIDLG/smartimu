@@ -10,12 +10,12 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use eframe::egui;
 use egui_plot::{Legend, Line, Plot, PlotPoints};
 use smartimu::{
-    DeviceFrame, ImuId, ImuNodeInfo, OrientationFrame, SampleFrame, WireFrame,
-    decode_binary_packet, decode_json,
+    BinaryDecoder, DeviceEvent, DeviceMessage, DeviceResponse, ImuId, ImuNodeInfo,
+    OrientationEvent, RawSampleEvent, ResponseResult, WireMessage, decode_json,
 };
 
 enum ViewerEvent {
-    Frame(DeviceFrame),
+    Message(DeviceMessage),
     Status(String),
 }
 
@@ -58,22 +58,22 @@ struct ViewerApp {
     receiver: Option<Receiver<ViewerEvent>>,
     status: String,
     imu_infos: HashMap<ImuId, ImuNodeInfo>,
-    latest_samples: HashMap<ImuId, SampleFrame>,
+    latest_samples: HashMap<ImuId, RawSampleEvent>,
     history: HashMap<ImuId, VecDeque<[f64; 7]>>,
     errors: VecDeque<String>,
-    active_imus: u16,
+    active_imu_ids: Vec<ImuId>,
     last_seq: Option<u32>,
     selected_imu: Option<ImuId>,
     recording: bool,
-    recorded_frames: Vec<DeviceFrame>,
+    recorded_messages: Vec<DeviceMessage>,
     export_status: String,
     input_mode: InputMode,
     view_mode: ViewMode,
     orientation: HashMap<ImuId, OrientationState>,
-    latest_orientation: HashMap<ImuId, OrientationFrame>,
+    latest_orientation: HashMap<ImuId, OrientationEvent>,
     quat_history: HashMap<ImuId, VecDeque<[f64; 5]>>,
     replay_path: String,
-    replay_frames: Vec<DeviceFrame>,
+    replay_messages: Vec<DeviceMessage>,
     replay_cursor: usize,
     replaying: bool,
     powershell_child: Option<Child>,
@@ -92,11 +92,11 @@ impl Default for ViewerApp {
             latest_samples: HashMap::new(),
             history: HashMap::new(),
             errors: VecDeque::new(),
-            active_imus: 0,
+            active_imu_ids: Vec::new(),
             last_seq: None,
             selected_imu: None,
             recording: false,
-            recorded_frames: Vec::new(),
+            recorded_messages: Vec::new(),
             export_status: String::new(),
             input_mode: InputMode::Auto,
             view_mode: ViewMode::Raw6Axis,
@@ -104,7 +104,7 @@ impl Default for ViewerApp {
             latest_orientation: HashMap::new(),
             quat_history: HashMap::new(),
             replay_path: String::from("imu-recording.jsonl"),
-            replay_frames: Vec::new(),
+            replay_messages: Vec::new(),
             replay_cursor: 0,
             replaying: false,
             powershell_child: None,
@@ -248,10 +248,13 @@ impl eframe::App for ViewerApp {
             .show(ctx, |ui| {
                 ui.heading("Status");
                 ui.label(format!("stream: {}", self.status));
-                ui.label(format!("active imus: {}", self.active_imus));
+                ui.label(format!("active imus: {}", self.active_imu_ids.len()));
                 ui.label(format!("recording: {}", self.recording));
-                ui.label(format!("recorded frames: {}", self.recorded_frames.len()));
-                ui.label(format!("replay frames: {}", self.replay_frames.len()));
+                ui.label(format!(
+                    "recorded messages: {}",
+                    self.recorded_messages.len()
+                ));
+                ui.label(format!("replay messages: {}", self.replay_messages.len()));
                 ui.label(format!("replaying: {}", self.replaying));
                 if let Some(last_seq) = self.last_seq {
                     ui.label(format!("last seq: {}", last_seq));
@@ -296,52 +299,53 @@ impl eframe::App for ViewerApp {
             });
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-                ui.heading("2D Dashboard");
+            egui::ScrollArea::vertical()
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    ui.heading("2D Dashboard");
 
-                for (imu_id, sample) in &self.latest_samples {
-                    ui.separator();
-                    let title = self
-                        .imu_infos
-                        .get(imu_id)
-                        .map(|info| info_label(info, sample.imu_id))
-                        .unwrap_or_else(|| String::from("unknown"));
+                    for (imu_id, sample) in &self.latest_samples {
+                        ui.separator();
+                        let title = self
+                            .imu_infos
+                            .get(imu_id)
+                            .map(|info| info_label(info, sample.payload.imu_id))
+                            .unwrap_or_else(|| String::from("unknown"));
 
-                    ui.label(format!(
-                        "{} imu={}/{} idx={} t={}us",
-                        title,
-                        imu_id.system_id,
-                        imu_id.sensor_id,
-                        sample.sample_index,
-                        sample.sample_timestamp_us
-                    ));
-                    if let Some(scale) = self
-                        .imu_infos
-                        .get(imu_id)
-                        .map(|info| smartimu::Imu6Scale::from(info.sample_config))
-                    {
-                        let physical = sample.sample.imu6.to_physical(scale);
                         ui.label(format!(
+                            "{} imu={}/{} idx={} t={}us",
+                            title,
+                            imu_id.system_id,
+                            imu_id.sensor_id,
+                            sample.payload.sample_index,
+                            sample.payload.timestamp_us
+                        ));
+                        if let Some(scale) = self
+                            .imu_infos
+                            .get(imu_id)
+                            .map(|info| smartimu::Imu6Scale::from(info.sample_config))
+                        {
+                            let physical = sample.payload.sample.imu6.to_physical(scale);
+                            ui.label(format!(
                             "{}",
                             match self.view_mode {
                                 ViewMode::Raw6Axis => format!(
-                                    "accel[g]=({:.3},{:.3},{:.3}) gyro[dps]=({:.2},{:.2},{:.2}) status=0x{:04X}",
+                                    "accel[g]=({:.3},{:.3},{:.3}) gyro[dps]=({:.2},{:.2},{:.2})",
                                     physical.accel_g[0],
                                     physical.accel_g[1],
                                     physical.accel_g[2],
                                     physical.gyro_dps[0],
                                     physical.gyro_dps[1],
-                                    physical.gyro_dps[2],
-                                    sample.status_bits
+                                    physical.gyro_dps[2]
                                 ),
                                 ViewMode::Quaternion => {
                                     if let Some(orientation) = self.latest_orientation.get(imu_id) {
                                         format!(
                                             "quat=({:.4},{:.4},{:.4},{:.4})",
-                                            orientation.quaternion.w,
-                                            orientation.quaternion.x,
-                                            orientation.quaternion.y,
-                                            orientation.quaternion.z
+                                            orientation.payload.quaternion.w,
+                                            orientation.payload.quaternion.x,
+                                            orientation.payload.quaternion.y,
+                                            orientation.payload.quaternion.z
                                         )
                                     } else {
                                         String::from("quat=unavailable")
@@ -349,36 +353,50 @@ impl eframe::App for ViewerApp {
                                 }
                             }
                         ));
-                    } else {
-                        ui.label(format!(
-                            "accel(raw)=({},{},{}) gyro(raw)=({},{},{}) status=0x{:04X}",
-                            sample.sample.imu6.accel[0],
-                            sample.sample.imu6.accel[1],
-                            sample.sample.imu6.accel[2],
-                            sample.sample.imu6.gyro[0],
-                            sample.sample.imu6.gyro[1],
-                            sample.sample.imu6.gyro[2],
-                            sample.status_bits
-                        ));
-                    }
+                        } else {
+                            ui.label(format!(
+                                "accel(raw)=({},{},{}) gyro(raw)=({},{},{})",
+                                sample.payload.sample.imu6.accel[0],
+                                sample.payload.sample.imu6.accel[1],
+                                sample.payload.sample.imu6.accel[2],
+                                sample.payload.sample.imu6.gyro[0],
+                                sample.payload.sample.imu6.gyro[1],
+                                sample.payload.sample.imu6.gyro[2]
+                            ));
+                        }
 
-                    let collapsed = self.collapsed_imus.entry(*imu_id).or_insert(false);
-                    if *collapsed {
-                        continue;
-                    }
+                        let collapsed = self.collapsed_imus.entry(*imu_id).or_insert(false);
+                        if *collapsed {
+                            continue;
+                        }
 
-                    match self.view_mode {
-                        ViewMode::Raw6Axis => {
-                            if let Some(history) = self.history.get(imu_id) {
-                                let accel_x = PlotPoints::from_iter(history.iter().map(|point| [point[0], point[1]]));
-                                let accel_y = PlotPoints::from_iter(history.iter().map(|point| [point[0], point[2]]));
-                                let accel_z = PlotPoints::from_iter(history.iter().map(|point| [point[0], point[3]]));
-                                let gyro_x = PlotPoints::from_iter(history.iter().map(|point| [point[0], point[4]]));
-                                let gyro_y = PlotPoints::from_iter(history.iter().map(|point| [point[0], point[5]]));
-                                let gyro_z = PlotPoints::from_iter(history.iter().map(|point| [point[0], point[6]]));
+                        match self.view_mode {
+                            ViewMode::Raw6Axis => {
+                                if let Some(history) = self.history.get(imu_id) {
+                                    let accel_x = PlotPoints::from_iter(
+                                        history.iter().map(|point| [point[0], point[1]]),
+                                    );
+                                    let accel_y = PlotPoints::from_iter(
+                                        history.iter().map(|point| [point[0], point[2]]),
+                                    );
+                                    let accel_z = PlotPoints::from_iter(
+                                        history.iter().map(|point| [point[0], point[3]]),
+                                    );
+                                    let gyro_x = PlotPoints::from_iter(
+                                        history.iter().map(|point| [point[0], point[4]]),
+                                    );
+                                    let gyro_y = PlotPoints::from_iter(
+                                        history.iter().map(|point| [point[0], point[5]]),
+                                    );
+                                    let gyro_z = PlotPoints::from_iter(
+                                        history.iter().map(|point| [point[0], point[6]]),
+                                    );
 
-                                ui.label("Accel [g]");
-                                Plot::new(format!("accel-plot-{}-{}", imu_id.system_id, imu_id.sensor_id))
+                                    ui.label("Accel [g]");
+                                    Plot::new(format!(
+                                        "accel-plot-{}-{}",
+                                        imu_id.system_id, imu_id.sensor_id
+                                    ))
                                     .legend(Legend::default())
                                     .height(140.0)
                                     .show(ui, |plot_ui| {
@@ -387,8 +405,11 @@ impl eframe::App for ViewerApp {
                                         plot_ui.line(Line::new("az", accel_z));
                                     });
 
-                                ui.label("Gyro [dps]");
-                                Plot::new(format!("gyro-plot-{}-{}", imu_id.system_id, imu_id.sensor_id))
+                                    ui.label("Gyro [dps]");
+                                    Plot::new(format!(
+                                        "gyro-plot-{}-{}",
+                                        imu_id.system_id, imu_id.sensor_id
+                                    ))
                                     .legend(Legend::default())
                                     .height(140.0)
                                     .show(ui, |plot_ui| {
@@ -396,17 +417,28 @@ impl eframe::App for ViewerApp {
                                         plot_ui.line(Line::new("gy", gyro_y));
                                         plot_ui.line(Line::new("gz", gyro_z));
                                     });
+                                }
                             }
-                        }
-                        ViewMode::Quaternion => {
-                            if let Some(history) = self.quat_history.get(imu_id) {
-                                let qw = PlotPoints::from_iter(history.iter().map(|point| [point[0], point[1]]));
-                                let qx = PlotPoints::from_iter(history.iter().map(|point| [point[0], point[2]]));
-                                let qy = PlotPoints::from_iter(history.iter().map(|point| [point[0], point[3]]));
-                                let qz = PlotPoints::from_iter(history.iter().map(|point| [point[0], point[4]]));
+                            ViewMode::Quaternion => {
+                                if let Some(history) = self.quat_history.get(imu_id) {
+                                    let qw = PlotPoints::from_iter(
+                                        history.iter().map(|point| [point[0], point[1]]),
+                                    );
+                                    let qx = PlotPoints::from_iter(
+                                        history.iter().map(|point| [point[0], point[2]]),
+                                    );
+                                    let qy = PlotPoints::from_iter(
+                                        history.iter().map(|point| [point[0], point[3]]),
+                                    );
+                                    let qz = PlotPoints::from_iter(
+                                        history.iter().map(|point| [point[0], point[4]]),
+                                    );
 
-                                ui.label("Quaternion");
-                                Plot::new(format!("quat-plot-{}-{}", imu_id.system_id, imu_id.sensor_id))
+                                    ui.label("Quaternion");
+                                    Plot::new(format!(
+                                        "quat-plot-{}-{}",
+                                        imu_id.system_id, imu_id.sensor_id
+                                    ))
                                     .legend(Legend::default())
                                     .height(180.0)
                                     .show(ui, |plot_ui| {
@@ -415,11 +447,11 @@ impl eframe::App for ViewerApp {
                                         plot_ui.line(Line::new("qy", qy));
                                         plot_ui.line(Line::new("qz", qz));
                                     });
+                                }
                             }
                         }
                     }
-                }
-            });
+                });
         });
 
         ctx.request_repaint_after(Duration::from_millis(16));
@@ -475,6 +507,7 @@ impl ViewerApp {
             let mut chunk = [0u8; 256];
             let mut line = Vec::<u8>::new();
             let mut packet = Vec::<u8>::new();
+            let mut binary_decoder = BinaryDecoder::new();
             let mut detected = input_mode;
             let mut saw_frame = false;
             let mut idle_count = 0u32;
@@ -485,7 +518,7 @@ impl ViewerApp {
                         idle_count = idle_count.saturating_add(1);
                         if idle_count == 20 && !saw_frame {
                             let _ = tx.send(ViewerEvent::Status(String::from(
-                                "opened port, waiting for valid frames",
+                                "opened port, waiting for valid messages",
                             )));
                         }
                     }
@@ -500,7 +533,7 @@ impl ViewerApp {
                                             let _ = tx.send(ViewerEvent::Status(String::from(
                                                 "json stream",
                                             )));
-                                            if tx.send(ViewerEvent::Frame(frame)).is_err() {
+                                            if tx.send(ViewerEvent::Message(frame)).is_err() {
                                                 return;
                                             }
                                         }
@@ -512,12 +545,14 @@ impl ViewerApp {
                                 InputMode::Binary => {
                                     if *byte == 0 {
                                         packet.push(0);
-                                        if let Some(frame) = parse_binary_packet(&packet) {
+                                        if let Some(frame) =
+                                            parse_binary_packet(&mut binary_decoder, &packet)
+                                        {
                                             saw_frame = true;
                                             let _ = tx.send(ViewerEvent::Status(String::from(
                                                 "binary stream",
                                             )));
-                                            if tx.send(ViewerEvent::Frame(frame)).is_err() {
+                                            if tx.send(ViewerEvent::Message(frame)).is_err() {
                                                 return;
                                             }
                                         }
@@ -534,20 +569,22 @@ impl ViewerApp {
                                             let _ = tx.send(ViewerEvent::Status(String::from(
                                                 "auto -> json",
                                             )));
-                                            if tx.send(ViewerEvent::Frame(frame)).is_err() {
+                                            if tx.send(ViewerEvent::Message(frame)).is_err() {
                                                 return;
                                             }
                                         }
                                         line.clear();
                                     } else if *byte == 0 {
                                         packet.push(0);
-                                        if let Some(frame) = parse_binary_packet(&packet) {
+                                        if let Some(frame) =
+                                            parse_binary_packet(&mut binary_decoder, &packet)
+                                        {
                                             detected = InputMode::Binary;
                                             saw_frame = true;
                                             let _ = tx.send(ViewerEvent::Status(String::from(
                                                 "auto -> binary",
                                             )));
-                                            if tx.send(ViewerEvent::Frame(frame)).is_err() {
+                                            if tx.send(ViewerEvent::Message(frame)).is_err() {
                                                 return;
                                             }
                                         }
@@ -588,7 +625,7 @@ impl ViewerApp {
                 None => break,
             };
             match event {
-                ViewerEvent::Frame(frame) => self.handle_frame(frame, true),
+                ViewerEvent::Message(frame) => self.handle_message(frame, true),
                 ViewerEvent::Status(status) => self.status = status,
             }
         }
@@ -607,26 +644,26 @@ impl ViewerApp {
     fn toggle_recording(&mut self) {
         self.recording = !self.recording;
         if self.recording {
-            self.recorded_frames.clear();
+            self.recorded_messages.clear();
             self.export_status = String::from("recording started");
         } else {
             self.export_status = format!(
                 "recording stopped with {} frames",
-                self.recorded_frames.len()
+                self.recorded_messages.len()
             );
         }
     }
 
     fn export_jsonl(&mut self) {
-        if self.recorded_frames.is_empty() {
-            self.export_status = String::from("no frames to export");
+        if self.recorded_messages.is_empty() {
+            self.export_status = String::from("no messages to export");
             return;
         }
 
         let path = export_path("imu-recording", "jsonl");
         let mut content = String::new();
-        for frame in &self.recorded_frames {
-            match serde_json::to_string(&WireFrame::Device(frame.clone())) {
+        for frame in &self.recorded_messages {
+            match serde_json::to_string(&WireMessage::Device(frame.clone())) {
                 Ok(line) => {
                     content.push_str(&line);
                     content.push('\n');
@@ -645,37 +682,35 @@ impl ViewerApp {
     }
 
     fn export_csv(&mut self) {
-        let mut content = String::from(
-            "system_id,sensor_id,seq,sample_index,sample_timestamp_us,ax,ay,az,gx,gy,gz,status_bits\n",
-        );
+        let mut content =
+            String::from("system_id,sensor_id,seq,sample_index,timestamp_us,ax,ay,az,gx,gy,gz\n");
         let mut rows = 0usize;
 
-        for frame in &self.recorded_frames {
-            if let DeviceFrame::Sample(sample) = frame {
+        for frame in &self.recorded_messages {
+            if let DeviceMessage::Event(DeviceEvent::RawSample(sample)) = frame {
                 rows += 1;
                 let _ = std::fmt::Write::write_fmt(
                     &mut content,
                     format_args!(
-                        "{},{},{},{},{},{},{},{},{},{},{},{}\n",
-                        sample.imu_id.system_id,
-                        sample.imu_id.sensor_id,
+                        "{},{},{},{},{},{},{},{},{},{},{}\n",
+                        sample.payload.imu_id.system_id,
+                        sample.payload.imu_id.sensor_id,
                         sample.header.seq,
-                        sample.sample_index,
-                        sample.sample_timestamp_us,
-                        sample.sample.imu6.accel[0],
-                        sample.sample.imu6.accel[1],
-                        sample.sample.imu6.accel[2],
-                        sample.sample.imu6.gyro[0],
-                        sample.sample.imu6.gyro[1],
-                        sample.sample.imu6.gyro[2],
-                        sample.status_bits
+                        sample.payload.sample_index,
+                        sample.payload.timestamp_us,
+                        sample.payload.sample.imu6.accel[0],
+                        sample.payload.sample.imu6.accel[1],
+                        sample.payload.sample.imu6.accel[2],
+                        sample.payload.sample.imu6.gyro[0],
+                        sample.payload.sample.imu6.gyro[1],
+                        sample.payload.sample.imu6.gyro[2]
                     ),
                 );
             }
         }
 
         if rows == 0 {
-            self.export_status = String::from("no sample frames to export");
+            self.export_status = String::from("no sample messages to export");
             return;
         }
 
@@ -701,7 +736,7 @@ impl ViewerApp {
             if trimmed.is_empty() {
                 continue;
             }
-            match decode_json(trimmed).ok().and_then(wire_to_device) {
+            match decode_json(trimmed).ok().and_then(wire_to_device_message) {
                 Some(frame) => frames.push(frame),
                 None => {
                     self.export_status = String::from("replay parse failed");
@@ -710,9 +745,9 @@ impl ViewerApp {
             }
         }
 
-        self.replay_frames = frames;
+        self.replay_messages = frames;
         self.replay_cursor = 0;
-        self.export_status = format!("loaded {} replay frames", self.replay_frames.len());
+        self.export_status = format!("loaded {} replay messages", self.replay_messages.len());
     }
 
     fn toggle_replay(&mut self) {
@@ -722,7 +757,7 @@ impl ViewerApp {
             return;
         }
 
-        if self.replay_frames.is_empty() {
+        if self.replay_messages.is_empty() {
             self.export_status = String::from("no replay loaded");
             return;
         }
@@ -739,66 +774,122 @@ impl ViewerApp {
         }
 
         let mut budget = 4usize;
-        while budget > 0 && self.replay_cursor < self.replay_frames.len() {
-            let frame = self.replay_frames[self.replay_cursor].clone();
-            self.handle_frame(frame, false);
+        while budget > 0 && self.replay_cursor < self.replay_messages.len() {
+            let frame = self.replay_messages[self.replay_cursor].clone();
+            self.handle_message(frame, false);
             self.replay_cursor += 1;
             budget -= 1;
         }
 
-        if self.replay_cursor >= self.replay_frames.len() {
+        if self.replay_cursor >= self.replay_messages.len() {
             self.replaying = false;
             self.status = String::from("replay finished");
         }
     }
 
-    fn handle_frame(&mut self, frame: DeviceFrame, allow_recording: bool) {
+    fn handle_message(&mut self, frame: DeviceMessage, allow_recording: bool) {
         if allow_recording && self.recording {
-            self.recorded_frames.push(frame.clone());
+            self.recorded_messages.push(frame.clone());
         }
 
         match frame {
-            DeviceFrame::Ping(ping) => {
+            DeviceMessage::Response(response) => self.handle_response(response),
+            DeviceMessage::Event(event) => self.handle_event(event),
+        }
+    }
+
+    fn handle_response(&mut self, response: DeviceResponse) {
+        match response {
+            DeviceResponse::Pong(pong) => {
                 self.status = format!(
                     "streaming {:?} session={} emit={}us",
-                    ping.header.format, ping.header.session_id, ping.header.emit_timestamp_us
+                    pong.header.format, pong.header.session_id, pong.header.timestamp_us
                 );
-                self.last_seq = Some(ping.header.seq);
+                self.last_seq = Some(pong.header.seq);
             }
-            DeviceFrame::Inventory(topology) => {
-                self.last_seq = Some(topology.header.seq);
-                self.imu_infos.clear();
-                for info in topology.imus {
-                    self.imu_infos.insert(info.id, info);
+            DeviceResponse::Inventory(inventory) => {
+                self.last_seq = Some(inventory.header.seq);
+                match inventory.result {
+                    ResponseResult::Ok(payload) => {
+                        self.imu_infos.clear();
+                        for info in payload.imus {
+                            self.imu_infos.insert(info.id, info);
+                        }
+                    }
+                    ResponseResult::Err(error) => {
+                        self.errors.push_back(format!(
+                            "inventory response error{}: {:?} {}",
+                            format_error_imu(error.imu_id),
+                            error.error,
+                            error.message
+                        ));
+                    }
                 }
             }
-            DeviceFrame::ImuNodeInfo(frame) => {
+            DeviceResponse::ImuNodeInfo(frame) => {
                 self.last_seq = Some(frame.header.seq);
-                if let Some(info) = frame.info {
-                    self.imu_infos.insert(info.id, info);
+                match frame.result {
+                    ResponseResult::Ok(payload) => {
+                        self.imu_infos.insert(payload.info.id, payload.info);
+                    }
+                    ResponseResult::Err(error) => {
+                        self.errors.push_back(format!(
+                            "imu info response error{}: {:?} {}",
+                            format_error_imu(error.imu_id),
+                            error.error,
+                            error.message
+                        ));
+                    }
                 }
             }
-            DeviceFrame::Sample(sample) => {
+            DeviceResponse::StartSampling(frame) => {
+                self.last_seq = Some(frame.header.seq);
+                if let ResponseResult::Err(error) = frame.result {
+                    self.errors.push_back(format!(
+                        "start sampling response error{}: {:?} {}",
+                        format_error_imu(error.imu_id),
+                        error.error,
+                        error.message
+                    ));
+                }
+            }
+            DeviceResponse::StopSampling(frame) => {
+                self.last_seq = Some(frame.header.seq);
+                if let ResponseResult::Err(error) = frame.result {
+                    self.errors.push_back(format!(
+                        "stop sampling response error{}: {:?} {}",
+                        format_error_imu(error.imu_id),
+                        error.error,
+                        error.message
+                    ));
+                }
+            }
+        }
+    }
+
+    fn handle_event(&mut self, event: DeviceEvent) {
+        match event {
+            DeviceEvent::RawSample(sample) => {
                 self.last_seq = Some(sample.header.seq);
                 self.update_orientation(&sample);
                 self.imu_infos
-                    .entry(sample.imu_id)
+                    .entry(sample.payload.imu_id)
                     .or_insert_with(|| ImuNodeInfo {
-                        id: sample.imu_id,
+                        id: sample.payload.imu_id,
                         bus_id: smartimu::BusId(0),
-                        chip_profile: fallback_chip_profile(sample.imu_chip),
+                        chip_profile: fallback_chip_profile(smartimu::ImuChip::Icm42688Pc),
                         label: None,
                         sample_config: fallback_sample_config(),
                     });
-                let entry = self.history.entry(sample.imu_id).or_default();
+                let entry = self.history.entry(sample.payload.imu_id).or_default();
                 let values = if let Some(scale) = self
                     .imu_infos
-                    .get(&sample.imu_id)
+                    .get(&sample.payload.imu_id)
                     .map(|info| smartimu::Imu6Scale::from(info.sample_config))
                 {
-                    let physical = sample.sample.imu6.to_physical(scale);
+                    let physical = sample.payload.sample.imu6.to_physical(scale);
                     [
-                        sample.sample_timestamp_us as f64 / 1_000_000.0,
+                        sample.payload.timestamp_us as f64 / 1_000_000.0,
                         physical.accel_g[0] as f64,
                         physical.accel_g[1] as f64,
                         physical.accel_g[2] as f64,
@@ -808,13 +899,13 @@ impl ViewerApp {
                     ]
                 } else {
                     [
-                        sample.sample_timestamp_us as f64 / 1_000_000.0,
-                        sample.sample.imu6.accel[0] as f64,
-                        sample.sample.imu6.accel[1] as f64,
-                        sample.sample.imu6.accel[2] as f64,
-                        sample.sample.imu6.gyro[0] as f64,
-                        sample.sample.imu6.gyro[1] as f64,
-                        sample.sample.imu6.gyro[2] as f64,
+                        sample.payload.timestamp_us as f64 / 1_000_000.0,
+                        sample.payload.sample.imu6.accel[0] as f64,
+                        sample.payload.sample.imu6.accel[1] as f64,
+                        sample.payload.sample.imu6.accel[2] as f64,
+                        sample.payload.sample.imu6.gyro[0] as f64,
+                        sample.payload.sample.imu6.gyro[1] as f64,
+                        sample.payload.sample.imu6.gyro[2] as f64,
                     ]
                 };
                 entry.push_back(values);
@@ -822,49 +913,44 @@ impl ViewerApp {
                     let _ = entry.pop_front();
                 }
                 if self.selected_imu.is_none() {
-                    self.selected_imu = Some(sample.imu_id);
+                    self.selected_imu = Some(sample.payload.imu_id);
                 }
-                self.latest_samples.insert(sample.imu_id, sample);
+                self.latest_samples.insert(sample.payload.imu_id, sample);
             }
-            DeviceFrame::Error(error) => {
+            DeviceEvent::Error(error) => {
                 self.last_seq = Some(error.header.seq);
-                self.status = format!("device error: {:?}", error.error);
-                self.errors
-                    .push_back(format!("{:?}: {}", error.error, error.message));
+                self.status = format!("device error: {:?}", error.payload.error);
+                self.errors.push_back(format!(
+                    "device error{}: {:?}: {}",
+                    format_error_imu(error.payload.imu_id),
+                    error.payload.error,
+                    error.payload.message
+                ));
                 while self.errors.len() > 32 {
                     let _ = self.errors.pop_front();
                 }
             }
-            DeviceFrame::ProbeResult(probe) => {
+            DeviceEvent::ProbeDetected(probe) => {
                 self.last_seq = Some(probe.header.seq);
-                match probe.result {
-                    smartimu::ProbeResult::Detected { .. } => {}
-                    smartimu::ProbeResult::NotDetected => self
-                        .errors
-                        .push_back(format!("probe {} found no chip", probe.probe_label)),
-                    smartimu::ProbeResult::Failed { error } => self
-                        .errors
-                        .push_back(format!("probe {} failed: {:?}", probe.probe_label, error)),
-                }
-                while self.errors.len() > 32 {
-                    let _ = self.errors.pop_front();
-                }
             }
-            DeviceFrame::Heartbeat(heartbeat) => {
+            DeviceEvent::Heartbeat(heartbeat) => {
                 self.last_seq = Some(heartbeat.header.seq);
-                self.active_imus = heartbeat.active_imus;
+                self.active_imu_ids = heartbeat.payload.active_imu_ids;
             }
-            DeviceFrame::Orientation(orientation) => {
+            DeviceEvent::Orientation(orientation) => {
                 self.last_seq = Some(orientation.header.seq);
                 self.latest_orientation
-                    .insert(orientation.imu_id, orientation.clone());
-                let entry = self.quat_history.entry(orientation.imu_id).or_default();
+                    .insert(orientation.payload.imu_id, orientation.clone());
+                let entry = self
+                    .quat_history
+                    .entry(orientation.payload.imu_id)
+                    .or_default();
                 entry.push_back([
-                    orientation.sample_timestamp_us as f64 / 1_000_000.0,
-                    orientation.quaternion.w as f64,
-                    orientation.quaternion.x as f64,
-                    orientation.quaternion.y as f64,
-                    orientation.quaternion.z as f64,
+                    orientation.payload.timestamp_us as f64 / 1_000_000.0,
+                    orientation.payload.quaternion.w as f64,
+                    orientation.payload.quaternion.x as f64,
+                    orientation.payload.quaternion.y as f64,
+                    orientation.payload.quaternion.z as f64,
                 ]);
                 while entry.len() > 256 {
                     let _ = entry.pop_front();
@@ -873,31 +959,35 @@ impl ViewerApp {
         }
     }
 
-    fn update_orientation(&mut self, sample: &SampleFrame) {
+    fn update_orientation(&mut self, sample: &RawSampleEvent) {
         let state = self
             .orientation
-            .entry(sample.imu_id)
+            .entry(sample.payload.imu_id)
             .or_insert_with(OrientationState::default);
 
         let dt = if let Some(last_timestamp_us) = state.last_sample_timestamp_us {
-            ((sample.sample_timestamp_us.saturating_sub(last_timestamp_us)) as f32 / 1_000_000.0)
+            ((sample
+                .payload
+                .timestamp_us
+                .saturating_sub(last_timestamp_us)) as f32
+                / 1_000_000.0)
                 .clamp(0.0, 0.1)
         } else {
             0.0
         };
-        state.last_sample_timestamp_us = Some(sample.sample_timestamp_us);
+        state.last_sample_timestamp_us = Some(sample.payload.timestamp_us);
 
-        let gx = sample.sample.imu6.gyro[0] as f32 * GYRO_DPS_PER_LSB;
-        let gy = sample.sample.imu6.gyro[1] as f32 * GYRO_DPS_PER_LSB;
-        let gz = sample.sample.imu6.gyro[2] as f32 * GYRO_DPS_PER_LSB;
+        let gx = sample.payload.sample.imu6.gyro[0] as f32 * GYRO_DPS_PER_LSB;
+        let gy = sample.payload.sample.imu6.gyro[1] as f32 * GYRO_DPS_PER_LSB;
+        let gz = sample.payload.sample.imu6.gyro[2] as f32 * GYRO_DPS_PER_LSB;
 
         state.roll += gx.to_radians() * dt;
         state.pitch += gy.to_radians() * dt;
         state.yaw += gz.to_radians() * dt;
 
-        let ax = sample.sample.imu6.accel[0] as f32;
-        let ay = sample.sample.imu6.accel[1] as f32;
-        let az = sample.sample.imu6.accel[2] as f32;
+        let ax = sample.payload.sample.imu6.accel[0] as f32;
+        let ay = sample.payload.sample.imu6.accel[1] as f32;
+        let az = sample.payload.sample.imu6.accel[2] as f32;
         let accel_norm = (ax * ax + ay * ay + az * az).sqrt().max(1.0);
         let axn = ax / accel_norm;
         let ayn = ay / accel_norm;
@@ -916,7 +1006,7 @@ impl ViewerApp {
         self.latest_samples.clear();
         self.history.clear();
         self.errors.clear();
-        self.active_imus = 0;
+        self.active_imu_ids.clear();
         self.last_seq = None;
         self.selected_imu = None;
         self.orientation.clear();
@@ -1005,11 +1095,11 @@ fn spawn_powershell_serial_reader(
                 )));
                 continue;
             }
-            if let Some(frame) = decode_json(trimmed).ok().and_then(wire_to_device) {
+            if let Some(frame) = decode_json(trimmed).ok().and_then(wire_to_device_message) {
                 let _ = tx.send(ViewerEvent::Status(String::from(
                     "json stream (powershell)",
                 )));
-                if tx.send(ViewerEvent::Frame(frame)).is_err() {
+                if tx.send(ViewerEvent::Message(frame)).is_err() {
                     break;
                 }
             }
@@ -1064,26 +1154,27 @@ fn normalize_serial_port_name(port_name: &str) -> String {
     port_name.to_string()
 }
 
-fn parse_json_line(buffer: &[u8]) -> Option<DeviceFrame> {
+fn parse_json_line(buffer: &[u8]) -> Option<DeviceMessage> {
     let line = std::str::from_utf8(buffer).ok()?.trim();
     if line.is_empty() {
         return None;
     }
     let json_start = line.find('{')?;
     let candidate = line[json_start..].trim();
-    decode_json(candidate).ok().and_then(wire_to_device)
+    decode_json(candidate).ok().and_then(wire_to_device_message)
 }
 
-fn parse_binary_packet(buffer: &[u8]) -> Option<DeviceFrame> {
-    decode_binary_packet::<1024>(buffer)
+fn parse_binary_packet(decoder: &mut BinaryDecoder, buffer: &[u8]) -> Option<DeviceMessage> {
+    decoder
+        .decode_packet(buffer)
         .ok()
-        .and_then(wire_to_device)
+        .and_then(wire_to_device_message)
 }
 
-fn wire_to_device(frame: WireFrame) -> Option<DeviceFrame> {
+fn wire_to_device_message(frame: WireMessage) -> Option<DeviceMessage> {
     match frame {
-        WireFrame::Device(frame) => Some(frame),
-        WireFrame::Host(_) => None,
+        WireMessage::Device(frame) => Some(frame),
+        WireMessage::Host(_) => None,
     }
 }
 
@@ -1104,7 +1195,7 @@ fn export_path(prefix: &str, extension: &str) -> String {
 
 fn draw_orientation_preview(
     ui: &mut egui::Ui,
-    sample: &SampleFrame,
+    sample: &RawSampleEvent,
     orientation: Option<OrientationState>,
 ) {
     let desired_size = egui::vec2(ui.available_width(), 220.0);
@@ -1121,9 +1212,9 @@ fn draw_orientation_preview(
     let center = rect.center();
     let radius = rect.width().min(rect.height()) * 0.24;
 
-    let ax = sample.sample.imu6.accel[0] as f32;
-    let ay = sample.sample.imu6.accel[1] as f32;
-    let az = sample.sample.imu6.accel[2] as f32;
+    let ax = sample.payload.sample.imu6.accel[0] as f32;
+    let ay = sample.payload.sample.imu6.accel[1] as f32;
+    let az = sample.payload.sample.imu6.accel[2] as f32;
     let norm = (ax * ax + ay * ay + az * az).sqrt().max(1.0);
     let vx = ax / norm;
     let vy = ay / norm;
@@ -1152,7 +1243,7 @@ fn draw_orientation_preview(
     );
 }
 
-fn draw_quaternion_preview(ui: &mut egui::Ui, orientation: &OrientationFrame) {
+fn draw_quaternion_preview(ui: &mut egui::Ui, orientation: &OrientationEvent) {
     let desired_size = egui::vec2(ui.available_width(), 220.0);
     let (rect, _) = ui.allocate_exact_size(desired_size, egui::Sense::hover());
     let painter = ui.painter_at(rect);
@@ -1174,18 +1265,18 @@ fn draw_quaternion_preview(ui: &mut egui::Ui, orientation: &OrientationFrame) {
         egui::Align2::LEFT_TOP,
         format!(
             "qw={:.4} qx={:.4} qy={:.4} qz={:.4}",
-            orientation.quaternion.w,
-            orientation.quaternion.x,
-            orientation.quaternion.y,
-            orientation.quaternion.z
+            orientation.payload.quaternion.w,
+            orientation.payload.quaternion.x,
+            orientation.payload.quaternion.y,
+            orientation.payload.quaternion.z
         ),
         egui::TextStyle::Body.resolve(ui.style()),
         ui.visuals().text_color(),
     );
 }
 
-fn quaternion_to_orientation_state(frame: &OrientationFrame) -> OrientationState {
-    let q = &frame.quaternion;
+fn quaternion_to_orientation_state(frame: &OrientationEvent) -> OrientationState {
+    let q = &frame.payload.quaternion;
     let sinr_cosp = 2.0 * (q.w * q.x + q.y * q.z);
     let cosr_cosp = 1.0 - 2.0 * (q.x * q.x + q.y * q.y);
     let roll = sinr_cosp.atan2(cosr_cosp);
@@ -1205,7 +1296,7 @@ fn quaternion_to_orientation_state(frame: &OrientationFrame) -> OrientationState
         roll,
         pitch,
         yaw,
-        last_sample_timestamp_us: Some(frame.sample_timestamp_us),
+        last_sample_timestamp_us: Some(frame.payload.timestamp_us),
     }
 }
 
@@ -1316,6 +1407,12 @@ fn info_label(info: &ImuNodeInfo, imu_id: ImuId) -> String {
         .unwrap_or_else(|| format!("imu-{}", imu_id.sensor_id))
 }
 
+fn format_error_imu(imu_id: Option<ImuId>) -> String {
+    imu_id
+        .map(|imu_id| format!(" imu={}/{}", imu_id.system_id, imu_id.sensor_id))
+        .unwrap_or_default()
+}
+
 fn fallback_sample_config() -> smartimu::ImuSampleConfig {
     smartimu::ImuSampleConfig {
         accel_range: smartimu::RangeG(2),
@@ -1324,8 +1421,8 @@ fn fallback_sample_config() -> smartimu::ImuSampleConfig {
     }
 }
 
-fn fallback_sample_config_options() -> smartimu::SampleConfigOptions {
-    smartimu::SampleConfigOptions::Constrained {
+fn fallback_sample_config_capability() -> smartimu::SampleConfigCapability {
+    smartimu::SampleConfigCapability::Constrained {
         configs: std::borrow::Cow::Owned(vec![fallback_sample_config()]),
     }
 }
@@ -1333,8 +1430,8 @@ fn fallback_sample_config_options() -> smartimu::SampleConfigOptions {
 fn fallback_chip_profile(chip: smartimu::ImuChip) -> smartimu::ImuChipProfile {
     smartimu::ImuChipProfile {
         chip,
-        sample_config_options: fallback_sample_config_options(),
-        sample_readout_support: smartimu::SampleReadoutSupport::default(),
-        temperature_config: None,
+        sample_config_capability: fallback_sample_config_capability(),
+        sensor_timestamp: false,
+        temperature_scale: None,
     }
 }
