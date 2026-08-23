@@ -61,7 +61,7 @@ pub fn load_replay_messages(path: &Path) -> Result<Vec<DeviceMessage>, String> {
 
 fn wire_to_device_message(frame: WireMessage) -> Option<DeviceMessage> {
     match frame {
-        WireMessage::Device(frame) => Some(frame),
-        WireMessage::Host(_) => None,
+        WireMessage::DeviceMessage(frame) => Some(frame),
+        WireMessage::HostRequest(_) => None,
     }
 }

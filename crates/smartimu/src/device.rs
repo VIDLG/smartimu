@@ -3,7 +3,7 @@ use crate::driver::ImuDriver;
 use crate::error::SmartImuError;
 use crate::protocol::SampleReadoutRequest;
 use crate::sample::RawImuSample;
-use crate::types::{DetectedChipInfo, ImuNodeInfo, ImuSampleConfig};
+use crate::types::{DetectedChipInfo, ImuDeviceInfo, ImuSampleConfig};
 use alloc::string::String;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -67,8 +67,8 @@ impl ConfiguredImuDevice {
         id: crate::ImuId,
         bus_id: crate::BusId,
         label: Option<String>,
-    ) -> ImuNodeInfo {
-        ImuNodeInfo {
+    ) -> ImuDeviceInfo {
+        ImuDeviceInfo {
             id,
             bus_id,
             chip_profile: self.probe_info.chip_profile.clone(),

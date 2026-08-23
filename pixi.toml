@@ -1,0 +1,16 @@
+[workspace]
+name = "smartimu"
+version = "0.1.0"
+description = "Host-side helper script environment for the ESP32-C3 multi-IMU board"
+channels = ["conda-forge"]
+platforms = ["win-64"]
+
+[tasks]
+serial-open-check = "python scripts/serial_open_check.py"
+hooks-install = "lefthook install"
+fmt-check = "just fmt-check"
+
+[dependencies]
+python = ">=3.12,<3.14"
+pyserial = ">=3.5,<4"
+lefthook = ">=1.13.6,<2"

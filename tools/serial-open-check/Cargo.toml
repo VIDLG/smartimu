@@ -1,8 +1,0 @@
-[package]
-name = "serial-open-check"
-edition.workspace = true
-rust-version.workspace = true
-version.workspace = true
-
-[dependencies]
-serialport.workspace = true

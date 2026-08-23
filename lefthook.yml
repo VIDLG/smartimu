@@ -1,0 +1,5 @@
+pre-commit:
+  commands:
+    fmt:
+      root: "."
+      run: sh -cu 'just fmt-check'

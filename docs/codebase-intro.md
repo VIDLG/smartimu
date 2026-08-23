@@ -34,17 +34,14 @@
 
 ```text
 crates/
-  imu-core
-  imu-drivers
-  imu-fusion
-  imu-firmware
-  imu-platform-esp
+  smartimu
 apps/
   esp32c3-board
 tools/
-  serial-open-check
   imu-viewer
   imu-viewer-wgpu
+scripts/
+  serial_open_check.py
 ```
 
 可以把它们理解成下面这几层：
@@ -378,8 +375,8 @@ BMI270 的初始化流程需要额外配置 blob，和当前已支持芯片的�
   - 架构、硬件、测试、排障、viewer 计划等文档。
 - `apps/esp32c3-board/src/bin/`
   - 一些辅助 probe 程序，偏调试用途。
-- `tools/serial-open-check`
-  - 很小的串口打开检查工具，主要帮助定位 Windows 串口问题。
+- `scripts/serial_open_check.py`
+  - Pixi 管理的 Python 串口打开检查脚本，主要帮助定位 Windows 串口问题。
 
 ## 推荐阅读顺序
 

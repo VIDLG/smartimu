@@ -33,6 +33,6 @@
 
 ## 补充资料
 
-- [project-guide.md](d:\Programs\rust\PCB_test\docs\project-guide.md)
-- [sensor-identification.md](d:\Programs\rust\PCB_test\docs\sensor-identification.md)
-- [troubleshooting.md](d:\Programs\rust\PCB_test\docs\troubleshooting.md)
+- [project-guide.md](project-guide.md)
+- [sensor-identification.md](sensor-identification.md)
+- [troubleshooting.md](troubleshooting.md)

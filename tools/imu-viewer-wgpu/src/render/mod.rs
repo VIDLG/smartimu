@@ -1,5 +1,5 @@
 use bytemuck::{Pod, Zeroable};
-use smartimu::{ImuId, Quaternion};
+use smartimu::{ImuId, Quaternion, SensorId, SystemId};
 use wgpu::{
     BindGroup, Buffer, Color, CommandEncoder, Device, FragmentState, MultisampleState,
     PipelineCompilationOptions, PrimitiveState, PrimitiveTopology, Queue,
@@ -322,8 +322,8 @@ fn build_instances(state: &ViewerState) -> Vec<InstanceRaw> {
     if ids.is_empty() {
         ids = (0..5)
             .map(|sensor_id| ImuId {
-                system_id: 1,
-                sensor_id,
+                system_id: SystemId(1),
+                sensor_id: SensorId(sensor_id),
             })
             .collect();
     }

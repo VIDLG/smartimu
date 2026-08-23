@@ -1,23 +1,128 @@
 use alloc::borrow::Cow;
 use alloc::string::String;
+use derive_more::{Display, From, Into};
 use serde::{Deserialize, Serialize};
+
+#[derive(
+    Clone, Copy, Debug, Default, Display, From, Into, PartialEq, Eq, Hash, Serialize, Deserialize,
+)]
+pub struct SystemId(pub u16);
+
+#[derive(
+    Clone, Copy, Debug, Default, Display, From, Into, PartialEq, Eq, Hash, Serialize, Deserialize,
+)]
+pub struct SessionId(pub u32);
+
+#[derive(
+    Clone, Copy, Debug, Default, Display, From, Into, PartialEq, Eq, Hash, Serialize, Deserialize,
+)]
+pub struct SensorId(pub u16);
+
+#[derive(
+    Clone, Debug, Default, Display, From, Into, PartialEq, Eq, Hash, Serialize, Deserialize,
+)]
+pub struct DriverId(pub String);
+
+#[derive(
+    Clone, Copy, Debug, Default, Display, From, Into, PartialEq, Eq, Hash, Serialize, Deserialize,
+)]
+pub struct MessageSeq(pub u32);
+
+impl MessageSeq {
+    pub fn wrapping_next(self) -> Self {
+        let value: u32 = self.into();
+        Self(value.wrapping_add(1))
+    }
+}
+
+#[derive(
+    Clone, Copy, Debug, Default, Display, From, Into, PartialEq, Eq, Hash, Serialize, Deserialize,
+)]
+pub struct TimestampUs(pub u64);
+
+impl TimestampUs {
+    pub fn elapsed_since(self, earlier: Self) -> u64 {
+        let now: u64 = self.into();
+        let earlier: u64 = earlier.into();
+        now.saturating_sub(earlier)
+    }
+
+    pub fn seconds_f64(self) -> f64 {
+        let value: u64 = self.into();
+        value as f64 / 1_000_000.0
+    }
+}
+
+#[derive(
+    Clone, Copy, Debug, Default, Display, From, Into, PartialEq, Eq, Hash, Serialize, Deserialize,
+)]
+pub struct SampleIndex(pub u32);
+
+impl SampleIndex {
+    pub fn wrapping_next(self) -> Self {
+        let value: u32 = self.into();
+        Self(value.wrapping_add(1))
+    }
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ImuId {
     /// Identifies the device or board that owns this IMU.
-    pub system_id: u16,
+    pub system_id: SystemId,
     /// Identifies one IMU within the owning system.
-    pub sensor_id: u16,
+    pub sensor_id: SensorId,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(
+    Clone, Copy, Debug, Default, Display, From, Into, PartialEq, Eq, Hash, Serialize, Deserialize,
+)]
 /// Identifies one physical or logical bus within a system.
 pub struct BusId(pub u8);
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SystemInfo {
-    pub system_id: u16,
+    pub system_id: SystemId,
     pub label: String,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PowerSource {
+    #[default]
+    Unknown,
+    Battery,
+    Usb,
+    External,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BatteryChargeState {
+    #[default]
+    Unknown,
+    NotCharging,
+    Charging,
+    Discharging,
+    Full,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BatteryStatus {
+    pub voltage_mv: Option<u16>,
+    pub percentage: Option<u8>,
+    pub temperature_deci_c: Option<i16>,
+    pub charge_state: BatteryChargeState,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PowerStatus {
+    pub source: PowerSource,
+    pub battery: Option<BatteryStatus>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LowPowerSeverity {
+    #[default]
+    Low,
+    Critical,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -27,7 +132,7 @@ pub struct BusInfo {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ImuChip {
+pub enum ImuChipModel {
     Icm42688Hxy,
     Icm42688Pc,
     Qmi8658A,
@@ -113,7 +218,7 @@ impl SampleConfigCapability {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ImuChipProfile {
-    pub chip: ImuChip,
+    pub model: ImuChipModel,
     pub sample_config_capability: SampleConfigCapability,
     pub sensor_timestamp: bool,
     pub temperature_scale: Option<TemperatureScale>,
@@ -132,7 +237,7 @@ pub struct DetectedChipInfo {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct ImuNodeInfo {
+pub struct ImuDeviceInfo {
     pub id: ImuId,
     pub bus_id: BusId,
     pub chip_profile: ImuChipProfile,

@@ -22,10 +22,10 @@ use esp_println::println;
 use smartimu::EspImuBus;
 use smartimu::fusion::{FusionFilter, FusionFilterSettings};
 use smartimu::{
-    BinaryEncoder, BusInfo, DeviceEvent, DeviceMessage, ImuBus, ImuChip, ImuChipProfile, ImuDriver,
-    ImuNodeInfo, ImuSampleConfig, OrientationEvent, OrientationPayload, ProbePlan, RangeDps,
-    RangeG, SampleRateHz, SessionRuntime, SpiProfile, Turnaround, WireFormat, bounded_string,
-    encode_json, probe,
+    BinaryEncoder, BusInfo, DeviceEvent, DeviceMessage, DeviceSession, ImuBus, ImuChipProfile,
+    ImuDeviceInfo, ImuDriver, ImuSampleConfig, OrientationEvent, OrientationPayload, ProbePlan,
+    RangeDps, RangeG, SampleIndex, SampleRateHz, SessionId, SpiProfile, TimestampUs, encode_json,
+    probe,
 };
 
 #[panic_handler]
@@ -48,9 +48,9 @@ struct DetectedImu {
 struct ImuRuntime {
     config: &'static board::BoardImuConfig,
     detected: Option<DetectedImu>,
-    sample_index: u32,
+    sample_index: SampleIndex,
     fusion: Option<FusionFilter>,
-    last_orientation_timestamp_us: Option<u64>,
+    last_orientation_timestamp_us: Option<TimestampUs>,
 }
 
 impl ImuRuntime {
@@ -58,7 +58,7 @@ impl ImuRuntime {
         Self {
             config,
             detected: None,
-            sample_index: 0,
+            sample_index: SampleIndex(0),
             fusion: None,
             last_orientation_timestamp_us: None,
         }
@@ -80,15 +80,8 @@ impl<'d> Transport<'d> {
         }
     }
 
-    fn format(&self) -> WireFormat {
-        match self.mode {
-            board::TransportMode::Json => WireFormat::Json,
-            board::TransportMode::Binary => WireFormat::Binary,
-        }
-    }
-
     fn emit_message(&mut self, message: &smartimu::DeviceMessage) {
-        let wire_message = smartimu::WireMessage::Device(message.clone());
+        let wire_message = smartimu::WireMessage::DeviceMessage(message.clone());
         match self.mode {
             board::TransportMode::Json => match encode_json::<768>(&wire_message) {
                 Ok(line) => {
@@ -163,7 +156,7 @@ async fn main(_spawner: Spawner) -> ! {
     };
     let mut transport = Transport::new(usb, board::TRANSPORT_MODE);
     let boot = Instant::now();
-    let mut session = SessionRuntime::new(board::SYSTEM_ID, 1, transport.format());
+    let mut session = DeviceSession::new(board::SYSTEM_ID, SessionId(1));
 
     let mut runtimes = board::BOARD_IMUS
         .each_ref()
@@ -224,12 +217,11 @@ async fn main(_spawner: Spawner) -> ! {
                             profile,
                             probe_match.info.clone(),
                         ));
-                        if chip_profile.chip != runtime.config.expected {
+                        if chip_profile.model != runtime.config.expected {
                             transport.emit_message(&session.error(
                                 device_timestamp_us(boot),
                                 Some(runtime.config.imu_id),
                                 smartimu::SmartImuError::ChipNotFound,
-                                "detected chip mismatches expected chip",
                             ));
                         }
                     }
@@ -238,7 +230,6 @@ async fn main(_spawner: Spawner) -> ! {
                             device_timestamp_us(boot),
                             Some(runtime.config.imu_id),
                             error,
-                            "probe match configuration failed",
                         ));
                     }
                 }
@@ -248,7 +239,6 @@ async fn main(_spawner: Spawner) -> ! {
                     device_timestamp_us(boot),
                     Some(runtime.config.imu_id),
                     smartimu::SmartImuError::ChipNotFound,
-                    &probe_snapshot(&mut bus, runtime.config.target, runtime.config.expected),
                 ));
             }
             Err(error) => {
@@ -256,7 +246,6 @@ async fn main(_spawner: Spawner) -> ! {
                     device_timestamp_us(boot),
                     Some(runtime.config.imu_id),
                     error,
-                    "probe error",
                 ));
             }
         }
@@ -266,7 +255,7 @@ async fn main(_spawner: Spawner) -> ! {
         device_timestamp_us(boot),
         "esp32c3-board",
         bus_infos(),
-        imu_infos(&runtimes),
+        imu_device_infos(&runtimes),
     ));
 
     loop {
@@ -282,7 +271,6 @@ async fn main(_spawner: Spawner) -> ! {
                     device_timestamp_us(boot),
                     Some(runtime.config.imu_id),
                     error,
-                    "profile switch failed",
                 ));
                 continue;
             }
@@ -297,8 +285,9 @@ async fn main(_spawner: Spawner) -> ! {
                 .await
             {
                 Ok(raw) => {
-                    runtime.sample_index = runtime.sample_index.wrapping_add(1);
-                    let sample_timestamp_us = Instant::now().duration_since(boot).as_micros();
+                    runtime.sample_index = runtime.sample_index.wrapping_next();
+                    let sample_timestamp_us =
+                        TimestampUs(Instant::now().duration_since(boot).as_micros());
                     transport.emit_message(&session.raw_sample(
                         device_timestamp_us(boot),
                         runtime.config.imu_id,
@@ -321,7 +310,7 @@ async fn main(_spawner: Spawner) -> ! {
                             physical.gyro_dps[2].to_radians(),
                         ];
                         let dt_s = if let Some(last) = runtime.last_orientation_timestamp_us {
-                            ((sample_timestamp_us.saturating_sub(last)) as f32 / 1_000_000.0)
+                            (sample_timestamp_us.elapsed_since(last) as f32 / 1_000_000.0)
                                 .clamp(0.0, 0.1)
                         } else {
                             0.0
@@ -346,7 +335,6 @@ async fn main(_spawner: Spawner) -> ! {
                         device_timestamp_us(boot),
                         Some(runtime.config.imu_id),
                         error,
-                        "sample error",
                     ));
                 }
             }
@@ -360,7 +348,7 @@ async fn main(_spawner: Spawner) -> ! {
                 device_timestamp_us(boot),
                 "esp32c3-board",
                 bus_infos(),
-                imu_infos(&runtimes),
+                imu_device_infos(&runtimes),
             ));
         }
 
@@ -372,39 +360,36 @@ fn init_heap() {
     esp_alloc::heap_allocator!(size: 32 * 1024);
 }
 
-fn device_timestamp_us(boot: Instant) -> u64 {
-    Instant::now().duration_since(boot).as_micros()
+fn device_timestamp_us(boot: Instant) -> TimestampUs {
+    TimestampUs(Instant::now().duration_since(boot).as_micros())
 }
 
 fn bus_infos() -> Vec<BusInfo> {
     let mut buses = Vec::new();
     buses.push(BusInfo {
         bus_id: board::BUS_ID,
-        label: bounded_string("spi2", smartimu::MAX_LABEL_LEN),
+        label: String::from("spi2"),
     });
     buses
 }
 
-fn imu_infos(runtimes: &[ImuRuntime; 5]) -> Vec<ImuNodeInfo> {
-    let mut imus = Vec::new();
+fn imu_device_infos(runtimes: &[ImuRuntime; 5]) -> Vec<ImuDeviceInfo> {
+    let mut imu_devices = Vec::new();
     for runtime in runtimes {
         let Some(detected) = runtime.detected.as_ref() else {
             continue;
         };
 
-        let info = ImuNodeInfo {
+        let info = ImuDeviceInfo {
             id: runtime.config.imu_id,
             bus_id: board::BUS_ID,
             chip_profile: detected.chip_profile.clone(),
-            label: Some(bounded_string(
-                runtime.config.label,
-                smartimu::MAX_LABEL_LEN,
-            )),
+            label: Some(String::from(runtime.config.label)),
             sample_config: detected.sample_config,
         };
-        imus.push(info);
+        imu_devices.push(info);
     }
-    imus
+    imu_devices
 }
 
 fn select_imu_sample_config(chip_profile: &ImuChipProfile) -> ImuSampleConfig {
@@ -420,48 +405,4 @@ fn select_imu_sample_config(chip_profile: &ImuChipProfile) -> ImuSampleConfig {
         .then_some(preferred)
         .or_else(|| sample_config_capability.first_config())
         .unwrap_or(preferred)
-}
-
-fn probe_snapshot(
-    bus: &mut dyn ImuBus,
-    target: smartimu::ImuTargetId,
-    _expected: ImuChip,
-) -> String {
-    let _ = bus.apply_profile(target, board::PROFILE_MODE0);
-    let r00_m0 = bus
-        .read_reg(target, 0x00, Turnaround(0))
-        .ok()
-        .unwrap_or(0xFF);
-    let r01_m0 = bus
-        .read_reg(target, 0x01, Turnaround(0))
-        .ok()
-        .unwrap_or(0xFF);
-    let r75_m0 = bus
-        .read_reg(target, 0x75, Turnaround(0))
-        .ok()
-        .unwrap_or(0xFF);
-
-    let _ = bus.apply_profile(target, board::PROFILE_MODE3);
-    let r00_m3 = bus
-        .read_reg(target, 0x00, Turnaround(0))
-        .ok()
-        .unwrap_or(0xFF);
-    let r01_m3 = bus
-        .read_reg(target, 0x01, Turnaround(0))
-        .ok()
-        .unwrap_or(0xFF);
-    let r75_m3 = bus
-        .read_reg(target, 0x75, Turnaround(0))
-        .ok()
-        .unwrap_or(0xFF);
-
-    let mut out = String::new();
-    let _ = core::fmt::write(
-        &mut out,
-        format_args!(
-            "m0 r00={:02X} r01={:02X} r75={:02X} m3 r00={:02X} r01={:02X} r75={:02X}",
-            r00_m0, r01_m0, r75_m0, r00_m3, r01_m3, r75_m3
-        ),
-    );
-    out
 }

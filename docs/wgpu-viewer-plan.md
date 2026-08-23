@@ -2,7 +2,7 @@
 
 ## Summary
 
-保留现有 [imu-viewer](d:\Programs\rust\PCB_test\tools\imu-viewer) 作为稳定版，不替换。新增一个并行实验性工具：
+保留现有 [imu-viewer](../tools/imu-viewer) 作为稳定版，不替换。新增一个并行实验性工具：
 
 - `tools/imu-viewer-wgpu`
 

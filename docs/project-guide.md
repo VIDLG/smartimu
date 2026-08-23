@@ -4,9 +4,9 @@
 
 这是一份单 crate 时代的项目说明，保留为历史背景资料。当前仓库主线已经迁移到 workspace 结构，请优先参考：
 
-- [readme.md](d:\Programs\rust\PCB_test\readme.md)
-- [architecture.md](d:\Programs\rust\PCB_test\docs\architecture.md)
-- [refactor-plan.md](d:\Programs\rust\PCB_test\docs\refactor-plan.md)
+- [README.md](../README.md)
+- [architecture.md](architecture.md)
+- [refactor-plan.md](refactor-plan.md)
 
 本文档中的目录结构、命令和实现路径不再完全代表当前主实现。
 
@@ -23,7 +23,7 @@
 ## 项目结构
 
 ```
-PCB_test/
+smartimu/  # 旧单 crate 时代结构示意
 ├── src/
 │   ├── bin/
 │   │   └── main.rs          # 主程序入口
@@ -110,7 +110,7 @@ PCB_test/
 ### 编译
 
 ```bash
-cargo build --bin PCB_test
+cargo build -p esp32c3-board --target riscv32imc-unknown-none-elf
 ```
 
 ### 烧录到开发板

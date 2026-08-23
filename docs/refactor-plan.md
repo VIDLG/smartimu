@@ -28,14 +28,17 @@ tools/imu-viewer/  +  tools/imu-viewer-wgpu/
 ```text
 .
 ├─ Cargo.toml
+├─ pixi.toml              ← host-side helper script environment
+├─ justfile               ← common task entrypoints
 ├─ crates/
 │  └─ smartimu/           ← 统一 crate（替代原 5 个独立 crate）
 ├─ apps/
 │  └─ esp32c3-board/
-└─ tools/
-   ├─ imu-viewer/
-   ├─ imu-viewer-wgpu/
-   └─ serial-open-check/
+├─ tools/
+│  ├─ imu-viewer/
+│  └─ imu-viewer-wgpu/
+└─ scripts/
+   └─ serial_open_check.py
 ```
 
 ## smartimu 模块设计
@@ -73,8 +76,7 @@ tools/imu-viewer/  +  tools/imu-viewer-wgpu/
 编码方式：
 
 - `feature = "binary"` → `postcard + COBS + CRC32`
-- `feature = "json"` → `serde-json-core` (no_std)
-- `feature = "std-json"` → `serde_json` (desktop)
+- `feature = "json"` → JSON protocol encode/decode via `serde-json-core` (no_std)
 
 ## 当前实现状态
 

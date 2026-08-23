@@ -160,7 +160,7 @@ pub fn show(ctx: &Context, state: &mut ViewerState, status: UiStatus<'_>) -> UiA
                     action = UiAction::SelectImu;
                 }
                 if let Some(info) = state.imu_infos.get(&imu_id) {
-                    ui.small(format!("{:?}", info.chip_profile.chip));
+                    ui.small(format!("{:?}", info.chip_profile.model));
                 }
                 ui.add_space(3.0);
             }

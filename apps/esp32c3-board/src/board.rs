@@ -1,5 +1,8 @@
 use smartimu::drivers::{hxy42688, icm42688, lsm6, qmi8658};
-use smartimu::{BusId, CandidateDriver, ImuChip, ImuId, ImuTargetId, SpiMode, SpiProfile};
+use smartimu::{
+    BusId, CandidateDriver, ImuChipModel, ImuId, ImuTargetId, SensorId, SpiMode, SpiProfile,
+    SystemId,
+};
 
 #[allow(dead_code)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -11,7 +14,7 @@ pub enum TransportMode {
 pub const SPI_FREQ_KHZ: u32 = 1_000;
 pub const STREAM_INTERVAL_MS: u64 = 5;
 pub const POWER_UP_DELAY_MS: u64 = 500;
-pub const SYSTEM_ID: u16 = 1;
+pub const SYSTEM_ID: SystemId = SystemId(1);
 pub const BUS_ID: BusId = BusId(0);
 #[cfg(feature = "json-transport")]
 pub const TRANSPORT_MODE: TransportMode = TransportMode::Json;
@@ -34,7 +37,7 @@ pub struct BoardImuConfig {
     pub imu_id: ImuId,
     pub target: ImuTargetId,
     pub label: &'static str,
-    pub expected: ImuChip,
+    pub expected: ImuChipModel,
     pub candidates: &'static [CandidateDriver],
 }
 
@@ -108,66 +111,66 @@ pub static BOARD_IMUS: [BoardImuConfig; 5] = [
     BoardImuConfig {
         imu_id: ImuId {
             system_id: SYSTEM_ID,
-            sensor_id: 1,
+            sensor_id: SensorId(1),
         },
         target: ImuTargetId {
             bus_id: BUS_ID,
             target_index: 0,
         },
         label: "slot-1",
-        expected: ImuChip::Icm42688Hxy,
+        expected: ImuChipModel::Icm42688Hxy,
         candidates: &SLOT1_CANDIDATES,
     },
     BoardImuConfig {
         imu_id: ImuId {
             system_id: SYSTEM_ID,
-            sensor_id: 2,
+            sensor_id: SensorId(2),
         },
         target: ImuTargetId {
             bus_id: BUS_ID,
             target_index: 1,
         },
         label: "slot-2",
-        expected: ImuChip::Icm42688Pc,
+        expected: ImuChipModel::Icm42688Pc,
         candidates: &SLOT2_CANDIDATES,
     },
     BoardImuConfig {
         imu_id: ImuId {
             system_id: SYSTEM_ID,
-            sensor_id: 3,
+            sensor_id: SensorId(3),
         },
         target: ImuTargetId {
             bus_id: BUS_ID,
             target_index: 2,
         },
         label: "slot-3",
-        expected: ImuChip::Icm42688Pc,
+        expected: ImuChipModel::Icm42688Pc,
         candidates: &SLOT3_CANDIDATES,
     },
     BoardImuConfig {
         imu_id: ImuId {
             system_id: SYSTEM_ID,
-            sensor_id: 4,
+            sensor_id: SensorId(4),
         },
         target: ImuTargetId {
             bus_id: BUS_ID,
             target_index: 3,
         },
         label: "slot-4",
-        expected: ImuChip::Qmi8658A,
+        expected: ImuChipModel::Qmi8658A,
         candidates: &SLOT4_CANDIDATES,
     },
     BoardImuConfig {
         imu_id: ImuId {
             system_id: SYSTEM_ID,
-            sensor_id: 5,
+            sensor_id: SensorId(5),
         },
         target: ImuTargetId {
             bus_id: BUS_ID,
             target_index: 4,
         },
         label: "slot-5",
-        expected: ImuChip::Sc7u22,
+        expected: ImuChipModel::Sc7u22,
         candidates: &SLOT5_CANDIDATES,
     },
 ];

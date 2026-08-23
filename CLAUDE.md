@@ -131,6 +131,19 @@ drivers/*.rs (individual IMU driver implementations)
 - Try different bus profiles if probe fails - some sensors are mode-sensitive
 - Confirm GPIO pin assignments match actual PCB wiring
 
+## Testing Conventions
+
+See `docs/testing.md` for the full testing strategy.
+
+- Prefer host-runnable deterministic tests whenever possible.
+- For module-level unit tests, keep test code in separate `*_tests.rs` files and include them with `#[cfg(test)]` plus `#[path = "..."] mod tests;`.
+- Use integration tests under `crates/*/tests/` for public API behavior, protocol compatibility, golden vectors, and cross-module behavior.
+- IMU driver tests should use the real driver with a fake `ImuBus` and chip-specific fake IMU models. Do not mock the driver being tested.
+- Fake IMU tests should cover probe IDs, revision checks, SPI profile fallback, initialization write order, data-ready behavior, sample layout, endian handling, and error paths.
+- Fusion tests should feed deterministic accel/gyro samples directly and assert numerical invariants with explicit tolerances.
+- Protocol tests should cover binary round-trip, malformed packets, CRC failures, packet length limits, JSON feature behavior where relevant, and golden compatibility cases when wire compatibility matters.
+- Hardware-in-the-loop tests should be minimal and clearly marked as requiring ESP32-C3 hardware.
+
 ## Important Notes
 
 - This project uses `esp-hal` 1.0+ which has significant API changes from 0.x versions
@@ -158,7 +171,7 @@ If sensors show as "unavailable" after running `cargo r`, check `docs/troublesho
 
 ## Chinese Documentation
 
-The primary documentation ([readme.md](d:\Programs\rust\PCB_test\readme.md), [docs/project-guide.md](d:\Programs\rust\PCB_test\docs\project-guide.md)) is in Chinese as this project targets Chinese IMU manufacturers and the LCSC electronics marketplace. Key Chinese terms:
+The primary documentation ([README.md](README.md), [docs/project-guide.md](docs/project-guide.md)) is in Chinese as this project targets Chinese IMU manufacturers and the LCSC electronics marketplace. Key Chinese terms:
 - 供应商 = vendor/manufacturer
 - 芯片选择 = chip select (CS)
 - 六轴 = 6-axis (3-axis accel + 3-axis gyro)

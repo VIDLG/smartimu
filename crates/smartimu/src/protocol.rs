@@ -6,14 +6,15 @@ use thiserror::Error;
 use crate::bus::SpiProfile;
 use crate::error::SmartImuError;
 use crate::sample::RawImuSample;
-use crate::types::{BusInfo, DetectedChipInfo, ImuId, ImuNodeInfo, Quaternion, SystemInfo};
+use crate::types::{
+    BusInfo, DetectedChipInfo, DriverId, ImuDeviceInfo, ImuId, LowPowerSeverity, MessageSeq,
+    PowerStatus, Quaternion, SampleIndex, SessionId, SystemId, SystemInfo, TimestampUs,
+};
 
-pub const PROTOCOL_VERSION: u8 = 1;
+pub const PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion { major: 1, minor: 0 };
 pub const MAX_IMUS_PER_SYSTEM: usize = 16;
 pub const MAX_BUSES_PER_SYSTEM: usize = 8;
-pub const MAX_LABEL_LEN: usize = 32;
-pub const MAX_MESSAGE_LEN: usize = 96;
-pub const MAX_BINARY_PACKET_LEN: usize = 1024;
+pub const MAX_BINARY_PACKET_LEN: usize = 1470;
 
 pub type BinaryCodecResult<T> = Result<T, BinaryCodecError>;
 
@@ -37,25 +38,33 @@ pub enum WireFormat {
     Json,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProtocolVersion {
+    pub major: u8,
+    pub minor: u8,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DeviceHeader {
-    pub protocol_version: u8,
-    pub format: WireFormat,
+    pub protocol_version: ProtocolVersion,
     /// Identifies which physical board is sending this message.
     /// Allows a host to distinguish data from multiple boards.
-    pub system_id: u16,
+    pub system_id: SystemId,
     /// Distinguishes different run sessions on the same board (increments on reboot).
-    pub session_id: u32,
+    pub session_id: SessionId,
     /// Monotonically increasing sequence number for ordering and loss detection.
-    pub seq: u32,
-    /// Device-side timestamp captured when this message is emitted.
-    pub timestamp_us: u64,
+    pub seq: MessageSeq,
+    /// Device-side timestamp captured when this protocol message is emitted.
+    /// Raw samples and orientations carry their own data timestamps in the payload.
+    pub timestamp_us: TimestampUs,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HostHeader {
-    pub protocol_version: u8,
-    pub seq: u32,
+    pub protocol_version: ProtocolVersion,
+    /// Host-side request sequence number. Host requests intentionally do not
+    /// carry timestamps because host and device clocks are different domains.
+    pub seq: MessageSeq,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -73,8 +82,53 @@ pub enum ResponseResult<T> {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProtocolError {
     pub imu_id: Option<ImuId>,
-    pub error: SmartImuError,
-    pub message: String,
+    pub code: ProtocolErrorCode,
+    pub details: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ProtocolErrorCode {
+    CommunicationError,
+    ChipNotFound,
+    ImuNotFound,
+    ConfigError,
+    DataNotReady,
+    MissingResource,
+    UnsupportedConfig,
+    InvalidTarget,
+    Internal,
+}
+
+impl From<SmartImuError> for ProtocolErrorCode {
+    fn from(error: SmartImuError) -> Self {
+        match error {
+            SmartImuError::CommunicationError => Self::CommunicationError,
+            SmartImuError::ChipNotFound => Self::ChipNotFound,
+            SmartImuError::ImuNotFound => Self::ImuNotFound,
+            SmartImuError::ConfigError => Self::ConfigError,
+            SmartImuError::DataNotReady => Self::DataNotReady,
+            SmartImuError::MissingResource => Self::MissingResource,
+            SmartImuError::UnsupportedConfig(_) => Self::UnsupportedConfig,
+            SmartImuError::InvalidTarget => Self::InvalidTarget,
+        }
+    }
+}
+
+impl From<SmartImuError> for ProtocolError {
+    fn from(error: SmartImuError) -> Self {
+        Self {
+            imu_id: None,
+            code: ProtocolErrorCode::from(error),
+            details: alloc::format!("{error}"),
+        }
+    }
+}
+
+impl ProtocolError {
+    pub fn with_imu_id(mut self, imu_id: Option<ImuId>) -> Self {
+        self.imu_id = imu_id;
+        self
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -105,24 +159,31 @@ pub struct GetInventoryRequest {
 pub struct InventoryPayload {
     pub system: SystemInfo,
     pub buses: Vec<BusInfo>,
-    pub imus: Vec<ImuNodeInfo>,
+    pub imu_devices: Vec<ImuDeviceInfo>,
 }
 
 pub type InventoryResponse = Response<InventoryPayload>;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct GetImuNodeInfoRequest {
+pub struct GetImuDeviceInfoRequest {
     pub header: HostHeader,
     pub imu_id: ImuId,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct ImuNodeInfoPayload {
+pub struct ImuDeviceInfoPayload {
     pub imu_id: ImuId,
-    pub info: ImuNodeInfo,
+    pub info: ImuDeviceInfo,
 }
 
-pub type ImuNodeInfoResponse = Response<ImuNodeInfoPayload>;
+pub type ImuDeviceInfoResponse = Response<ImuDeviceInfoPayload>;
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GetPowerStatusRequest {
+    pub header: HostHeader,
+}
+
+pub type PowerStatusResponse = Response<PowerStatus>;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ImuSelection {
@@ -167,7 +228,7 @@ pub type StopSamplingResponse = Response<StopSamplingPayload>;
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ProbeDetectedPayload {
     pub imu_id: ImuId,
-    pub driver_id: String,
+    pub driver_id: DriverId,
     pub spi_profile: SpiProfile,
     pub chip_info: DetectedChipInfo,
 }
@@ -177,8 +238,9 @@ pub type ProbeDetectedEvent = Event<ProbeDetectedPayload>;
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RawSamplePayload {
     pub imu_id: ImuId,
-    pub sample_index: u32,
-    pub timestamp_us: u64,
+    pub sample_index: SampleIndex,
+    /// Device-side timestamp for when this raw sample was captured/read.
+    pub timestamp_us: TimestampUs,
     pub sample: RawImuSample,
 }
 
@@ -187,14 +249,26 @@ pub type RawSampleEvent = Event<RawSamplePayload>;
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct OrientationPayload {
     pub imu_id: ImuId,
-    pub sample_index: u32,
-    pub timestamp_us: u64,
+    pub sample_index: SampleIndex,
+    /// Device-side timestamp for the sample time represented by this orientation.
+    pub timestamp_us: TimestampUs,
     pub quaternion: Quaternion,
 }
 
 pub type OrientationEvent = Event<OrientationPayload>;
 
 pub type ErrorEvent = Event<ProtocolError>;
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PowerEventPayload {
+    Status(PowerStatus),
+    LowPower {
+        status: PowerStatus,
+        severity: LowPowerSeverity,
+    },
+}
+
+pub type PowerEvent = Event<PowerEventPayload>;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HeartbeatPayload {
@@ -207,42 +281,49 @@ pub type HeartbeatEvent = Event<HeartbeatPayload>;
 pub enum HostRequest {
     Ping(PingRequest),
     GetInventory(GetInventoryRequest),
-    GetImuNodeInfo(GetImuNodeInfoRequest),
+    GetImuDeviceInfo(GetImuDeviceInfoRequest),
+    GetPowerStatus(GetPowerStatusRequest),
     StartSampling(StartSamplingRequest),
     StopSampling(StopSamplingRequest),
 }
 
+/// Response to a host request.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum DeviceResponse {
     Pong(PongResponse),
     Inventory(InventoryResponse),
-    ImuNodeInfo(ImuNodeInfoResponse),
+    ImuDeviceInfo(ImuDeviceInfoResponse),
+    PowerStatus(PowerStatusResponse),
     StartSampling(StartSamplingResponse),
     StopSampling(StopSamplingResponse),
 }
 
+/// Device-originated notification that is not tied to a specific host request.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum DeviceEvent {
     ProbeDetected(ProbeDetectedEvent),
     RawSample(RawSampleEvent),
     Orientation(OrientationEvent),
     Error(ErrorEvent),
+    Power(PowerEvent),
     Heartbeat(HeartbeatEvent),
 }
 
+/// Any message emitted by the device.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum DeviceMessage {
     Response(DeviceResponse),
     Event(DeviceEvent),
 }
 
+/// Top-level message carried by JSON, binary serial, or other transports.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum WireMessage {
-    Host(HostRequest),
-    Device(DeviceMessage),
+    HostRequest(HostRequest),
+    DeviceMessage(DeviceMessage),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct BinaryEncoder {
     raw: Vec<u8>,
     framed: Vec<u8>,
@@ -284,13 +365,7 @@ impl BinaryEncoder {
     }
 }
 
-impl Default for BinaryEncoder {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct BinaryDecoder {
     decoded: Vec<u8>,
 }
@@ -343,12 +418,6 @@ impl BinaryDecoder {
     }
 }
 
-impl Default for BinaryDecoder {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 #[cfg(feature = "json")]
 pub fn encode_json<const N: usize>(
     message: &WireMessage,
@@ -360,7 +429,7 @@ pub fn encode_json<const N: usize>(
         .map_err(|_| serde_json_core::ser::Error::BufferFull)
 }
 
-#[cfg(feature = "std-json")]
-pub fn decode_json(line: &str) -> Result<WireMessage, serde_json::Error> {
-    serde_json::from_str(line)
+#[cfg(feature = "json")]
+pub fn decode_json(line: &str) -> Result<WireMessage, serde_json_core::de::Error> {
+    serde_json_core::from_str(line).map(|(message, _used)| message)
 }

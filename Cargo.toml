@@ -2,7 +2,6 @@
 members = [
   "crates/smartimu",
   "apps/esp32c3-board",
-  "tools/serial-open-check",
   "tools/imu-viewer",
   "tools/imu-viewer-wgpu",
 ]
@@ -19,6 +18,11 @@ bytemuck = { version = "1.25.0", features = ["derive"] }
 cobs = { version = "0.3.0", default-features = false }
 crc32fast = { version = "1.4.2", default-features = false }
 defmt = "1.0.1"
+derive_more = { version = "2.1.1", default-features = false, features = [
+  "display",
+  "from",
+  "into",
+] }
 eframe = "0.33.0"
 egui = "0.33.0"
 egui-wgpu = "0.33.0"

@@ -3,16 +3,17 @@
 extern crate alloc;
 
 pub mod bus;
+#[cfg(feature = "esp")]
 pub mod delay;
 #[cfg(feature = "esp")]
 pub mod device;
+#[cfg(feature = "esp")]
 pub mod driver;
 pub mod error;
 #[cfg(feature = "esp")]
 pub mod probe;
 pub mod protocol;
 pub mod sample;
-#[cfg(feature = "esp")]
 pub mod transport;
 pub mod types;
 
@@ -23,6 +24,7 @@ pub mod fusion;
 pub mod platform;
 
 pub use bus::{ImuBus, ImuTargetId, SpiMode, SpiProfile, Turnaround};
+#[cfg(feature = "esp")]
 pub use driver::{
     DataReadyCondition, DataReadyStatus, DriverInfo, ImuDriver, ImuTargetInfo, ProbeRegisterMatch,
     ProbeRegisterReadout, SampleByteOrder, SampleRegisterReadout, ensure_sample_config_allowed,
@@ -35,11 +37,14 @@ pub use sample::{
     RawImuSample, RawTemperature, SensorTimestamp,
 };
 pub use types::{
-    BusId, BusInfo, DetectedChipInfo, ImuChip, ImuChipProfile, ImuId, ImuIdentity, ImuNodeInfo,
-    ImuSampleConfig, Quaternion, RangeDps, RangeG, SampleConfigCapability, SampleRateHz,
-    SystemInfo, TemperatureScale,
+    BatteryChargeState, BatteryStatus, BusId, BusInfo, DetectedChipInfo, DriverId, ImuChipModel,
+    ImuChipProfile, ImuDeviceInfo, ImuId, ImuIdentity, ImuSampleConfig, LowPowerSeverity,
+    MessageSeq, PowerSource, PowerStatus, Quaternion, RangeDps, RangeG, SampleConfigCapability,
+    SampleIndex, SampleRateHz, SensorId, SessionId, SystemId, SystemInfo, TemperatureScale,
+    TimestampUs,
 };
 
+#[cfg(feature = "esp")]
 pub use delay::delay_ms;
 #[cfg(feature = "esp")]
 pub use device::{ConfiguredImuDevice, DetectedImuDevice};
@@ -49,5 +54,4 @@ pub use platform::bus::EspImuBus;
 pub use probe::{
     CandidateDriver, ProbeMatch, ProbePlan, probe, probe_driver, probe_first_matching,
 };
-#[cfg(feature = "esp")]
-pub use transport::{SessionRuntime, bounded_string, protocol_string};
+pub use transport::{DeviceSession, HostClient};

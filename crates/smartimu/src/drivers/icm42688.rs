@@ -1,7 +1,7 @@
 use crate::{
-    DataReadyCondition, DataReadyStatus, DriverInfo, ImuBus, ImuChip, ImuChipProfile, ImuDriver,
-    ImuSampleConfig, ImuTargetId, ProbeRegisterMatch, ProbeRegisterReadout, RangeDps, RangeG,
-    SampleByteOrder, SampleRateHz, SampleRegisterReadout, SmartImuError, delay_ms,
+    DataReadyCondition, DataReadyStatus, DriverInfo, ImuBus, ImuChipModel, ImuChipProfile,
+    ImuDriver, ImuSampleConfig, ImuTargetId, ProbeRegisterMatch, ProbeRegisterReadout, RangeDps,
+    RangeG, SampleByteOrder, SampleRateHz, SampleRegisterReadout, SmartImuError, delay_ms,
 };
 use alloc::{borrow::Cow, boxed::Box};
 use async_trait::async_trait;
@@ -30,7 +30,7 @@ const PROBE_MATCHES: &[ProbeRegisterMatch] = &[ProbeRegisterMatch::WhoAmIAndRevi
 }];
 
 pub static CHIP_PROFILE: ImuChipProfile = ImuChipProfile {
-    chip: ImuChip::Icm42688Pc,
+    model: ImuChipModel::Icm42688Pc,
     sample_config_capability: crate::SampleConfigCapability::Independent {
         accel_ranges: Cow::Borrowed(ACCEL_RANGES),
         gyro_ranges: Cow::Borrowed(GYRO_RANGES),

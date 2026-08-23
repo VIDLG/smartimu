@@ -7,21 +7,25 @@ version.workspace = true
 [features]
 default = []
 json = ["dep:serde-json-core"]
-std-json = ["std", "dep:serde_json"]
-std = []
-esp = ["dep:esp-hal", "dep:embedded-hal"]
+esp = [
+  "dep:async-trait",
+  "dep:embassy-time",
+  "dep:embedded-hal",
+  "dep:esp-hal",
+  "dep:hashbrown",
+]
 
 [dependencies]
-async-trait.workspace = true
+async-trait = { workspace = true, optional = true }
 cobs.workspace = true
 crc32fast.workspace = true
+derive_more.workspace = true
 postcard.workspace = true
 serde.workspace = true
 serde-json-core = { workspace = true, optional = true }
-serde_json = { workspace = true, optional = true }
 thiserror.workspace = true
-embassy-time.workspace = true
-hashbrown.workspace = true
+embassy-time = { workspace = true, optional = true }
+hashbrown = { workspace = true, optional = true }
 libm.workspace = true
 # ESP platform (optional)
 embedded-hal = { workspace = true, optional = true }
