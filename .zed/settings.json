@@ -2,17 +2,16 @@
   "lsp": {
     "rust-analyzer": {
       "binary": {
-        "path": "D:\\scoop\\persist\\rustup\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\rust-analyzer.exe",
-        "arguments": [],
+        "path": "D:\\dev\\cargo\\bin\\pixi.exe",
+        "arguments": ["run", "rust-analyzer"],
       },
       "initialization_options": {
+        "checkOnSave": false,
         "cargo": {
-          "target": "riscv32imc-unknown-none-elf",
           "allTargets": false,
         },
         "check": {
           "workspace": false,
-          "targets": null,
         },
       },
     },

@@ -1,0 +1,10 @@
+[package]
+name = "smartimu-hil"
+edition.workspace = true
+rust-version.workspace = true
+version.workspace = true
+publish = false
+
+[dependencies]
+serialport.workspace = true
+smartimu = { path = "../../crates/smartimu", features = ["json"] }

@@ -83,12 +83,14 @@ impl<'d> Transport<'d> {
     fn emit_message(&mut self, message: &smartimu::DeviceMessage) {
         let wire_message = smartimu::WireMessage::DeviceMessage(message.clone());
         match self.mode {
-            board::TransportMode::Json => match encode_json::<768>(&wire_message) {
-                Ok(line) => {
-                    println!("{}", line);
+            board::TransportMode::Json => {
+                match encode_json::<{ board::JSON_MESSAGE_BUFFER_LEN }>(&wire_message) {
+                    Ok(line) => {
+                        println!("{}", line);
+                    }
+                    Err(_) => {}
                 }
-                Err(_) => {}
-            },
+            }
             board::TransportMode::Binary => {
                 let Some(usb) = self.usb.as_mut() else {
                     return;

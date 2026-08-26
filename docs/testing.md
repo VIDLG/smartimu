@@ -325,7 +325,17 @@ Hardware tests should validate behavior that fake tests cannot cover:
 
 Keep hardware tests few and explicit. They should not be required for ordinary host-side development unless the change touches board integration.
 
-See `docs/test-plan.md` for release-oriented build, flash, viewer, and hardware validation steps.
+The host-side HIL harness lives under `tests/hil`. Its pure validation logic runs as part of `test-host`, while the real board integration test is marked `#[ignore]` and runs only through:
+
+```bash
+pixi run just hil
+```
+
+The default JSON HIL test auto-detects a unique serial port and observes the board for 10 seconds. Set `ESPFLASH_PORT`, pass a port explicitly (`pixi run just hil COM5`), or change the observation period (`pixi run just hil COM5 20`) when needed. Before running it, flash firmware built from the same working tree; protocol mismatch is treated as a test failure.
+
+The current five-IMU board acceptance requires slot 1, 2, 4, and 5 to report their configured chip models, produce advancing and non-constant raw samples, emit valid orientations, and appear in heartbeat messages. Slot 3 remains disabled and its `ChipNotFound` startup event is allowed. Transient `DataNotReady` events are counted but accepted when the same active IMU continues to meet the sample requirements; communication and configuration errors still fail the test.
+
+See [test-plan.md](test-plan.md) for release-oriented build, flash, viewer, and hardware validation steps.
 
 ## Suggested implementation order
 

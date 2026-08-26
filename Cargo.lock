@@ -3900,6 +3900,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "smartimu-hil"
+version = "0.1.0"
+dependencies = [
+ "serialport",
+ "smartimu",
+]
+
+[[package]]
 name = "smithay-client-toolkit"
 version = "0.19.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -1,173 +1,111 @@
-# 传感器检测故障排查指南（历史路径参考）
+# 故障排查
 
-本文档中的 `src/...` 路径来自单 crate 时代，仅作为历史诊断参考。当前主实现已迁移到 workspace 结构。
+本页按“供电与连接 → SPI/CS → probe → 初始化 → 采样 → 串口/viewer”的顺序排查当前 workspace。旧单-crate时代的寄存器快照和一次性结论保存在 [历史归档](archive/README.md)。
 
-## 如何解读诊断输出
+## 先确认当前事实
 
-运行 `cargo r` 后，程序会输出详细的 probe 信息和检测过程。
+1. 查看 [硬件](hardware.md) 的当前引脚表。
+2. 核对 [`board.rs`](../apps/esp32c3-board/src/board.rs) 的候选驱动和 SPI profile。
+3. 核对 [`main.rs`](../apps/esp32c3-board/src/main.rs) 的 `EspImuBus::with_target()` 绑定。
+4. 注意 slot 3 当前禁用：没有候选驱动，也没有 CS target。
 
-### 1. Probe 快照分析
+不要直接照搬归档文档中的 GPIO、旧 `src/...` 路径或 BMI270 结论。
 
-格式：`probe{N}: m0[r00=XX r00d1=XX r75=XX] m3[r00=XX r00d1=XX r01=XX r0f=XX r75=XX]`
+## 快速决策表
 
-- `m0` = SPI Mode 0
-- `m3` = SPI Mode 3
-- `rXX` = 寄存器地址（十六进制）
-- `rXXd1` = 带 1 个 dummy byte 的读取
+| 症状 | 优先检查 |
+|---|---|
+| 所有槽位无响应 | 供电、SCK/MOSI/MISO、主控 SPI 初始化 |
+| 单个槽位始终 `0xFF` | 该槽位 CS、焊接、芯片供电、MISO 连通性 |
+| 固定但错误的 ID | SPI mode、频率、dummy/turnaround、寄存器地址 |
+| probe 成功但 configure 失败 | reset/写入顺序、延迟、量程/ODR 支持 |
+| 偶发成功、偶发失败 | 电源纹波、CS 默认电平、线长、频率、上电等待 |
+| 有设备但没有 sample | data-ready、采样寄存器布局、轮询超时、配置结果 |
+| 设备输出正常但 viewer 无数据 | 串口占用、transport 模式、波特率/USB 通道、分帧错误 |
 
-#### 典型值解读：
+## 1. 供电和物理连接
 
-| 读取值 | 含义 | 可能原因 |
-|--------|------|----------|
-| `0xFF` | 总线无响应 | 传感器未焊接、电源问题、CS 引脚错误 |
-| `0x00` | 总线被拉低 | 传感器故障、短路 |
-| 固定值（如 `0x3E`） | 可能读到其他寄存器 | SPI 时序问题、寄存器地址错误 |
-| 正确的 CHIP_ID | 传感器正常响应 | ✓ 正常 |
+- [ ] 供电电压和地稳定。
+- [ ] 芯片方向正确，无虚焊、桥接或缺件。
+- [ ] SCK GPIO6、MOSI GPIO7、MISO GPIO2 与所有已启用 IMU 连通。
+- [ ] 每个已启用 CS 与 [硬件](hardware.md) 当前表一致。
+- [ ] 未访问时所有 CS 保持高电平。
 
-### 2. 传感器期望的 CHIP_ID
+如果结果随重启或触碰板子变化，先解决电气问题，不要用无限重试掩盖。
 
-| 传感器 | 寄存器地址 | 期望值 | Dummy Bytes | SPI Mode |
-|--------|-----------|--------|-------------|----------|
-| ICM-42688-HXY | 0x01 | 0x6A | 0 | Mode 0/3 |
-| ICM-42688-PC | 0x75 | 0x47 | 0 | Mode 0 |
-| BMI270 | 0x00 | 0x24 | 1 | Mode 3 |
-| QMI8658A | 0x00 | 0x05 | 0 | Mode 0 |
-| SC7U22/LSM6 | 0x0F/0x01 | 0x6A | 0 | Mode 3 |
+## 2. 解读常见 SPI 返回值
 
-### 3. 检测日志分析
+| 返回值模式 | 常见含义 | 下一步 |
+|---|---|---|
+| 全部 `0xFF` | 没有从设备驱动 MISO | 查 CS、供电、焊接和 MISO |
+| 全部 `0x00` | 总线被拉低或设备异常 | 查短路、mode 和器件状态 |
+| 稳定的非预期值 | 读错寄存器或时序不匹配 | 查地址、turnaround、mode、频率 |
+| 正确 ID 后又丢失 | 上电/reset/供电或 CS 状态不稳定 | 延长等待并观察波形 |
 
-格式：`Slot {N}: Trying {Driver} with {Profile} -> {Result}`
+降低 SPI 频率可用于定位信号完整性问题，但要记录原值、测试值和结果。当前基准为 1 MHz，配置位于 `board.rs`。
 
-- `PROBE OK` = 传感器识别成功
-- `probe failed` = WHO_AM_I 寄存器不匹配
-- `init failed` = 传感器初始化失败
+## 3. Probe 失败
 
-## 常见问题及解决方案
+检查顺序：
 
-### 问题 1：所有读取返回 0xFF
+1. 目标是否实际注册到 `EspImuBus`。
+2. `ImuTargetId.target_index` 是否与 CS 绑定一致。
+3. 候选驱动是否包含实际芯片。
+4. 候选 profile 是否包含芯片支持的 mode。
+5. `WHO_AM_I`、revision 地址和值是否正确。
+6. 芯片读取是否需要额外 turnaround/dummy byte。
 
-**症状：**
-```
-probe2: m0[r00=Some(ff) r00d1=Some(ff) r75=Some(ff)] m3[...]
-```
+若要增加诊断，优先记录“目标、profile、寄存器、返回值和错误”，不要只输出一个 `probe failed`。
 
-**可能原因：**
-1. 传感器未焊接到 PCB 上
-2. CS 引脚连接错误
-3. 电源供电问题（5V 或 3.3V）
-4. SPI 总线连接问题（MISO 引脚）
+## 4. Probe 成功但配置失败
 
-**排查步骤：**
-1. 检查传感器是否已焊接到对应的插槽
-2. 用万用表测量 CS 引脚在读取时是否有电平变化（应该是 HIGH→LOW→HIGH）
-3. 检查 VCC 和 GND 是否正常供电
-4. 检查 MISO 引脚是否正确连接到 GPIO2
+- 核对驱动 `reset()` 和 `configure()` 的寄存器写入顺序。
+- 核对 reset 后和关键写入后的最小延迟。
+- 确认 `ImuSampleConfig` 在芯片能力范围内。
+- 确认失败是否来自通信、unsupported config 或设备状态。
+- 用 real driver + fake bus + chip fake 复现顺序问题，避免只靠实机反复试参数。
 
-### 问题 2：读取到非预期的固定值
+测试模式见 [测试策略：IMU driver tests](testing.md#imu-driver-tests)。
 
-**症状：**
-```
-probe2: m0[r00=Some(3e) r00d1=Some(3e) r75=Some(00)]
-```
+## 5. 有设备但没有采样
 
-**可能原因：**
-1. SPI 时序不匹配（频率过快、Mode 不对）
-2. 传感器需要更长的上电延迟
-3. 传感器处于未知状态，需要软复位
+- 确认 configure 已成功，设备被加入 active 集合。
+- 检查 data-ready 寄存器、mask 和条件。
+- 检查 poll 次数、间隔和 `read_on_timeout` 行为。
+- 检查数据起始寄存器、大小端和轴顺序。
+- 不建议长期注释 data-ready 检查；先通过 fake model 证明是哪一层的问题。
 
-**排查步骤：**
-1. 降低当前 board/device profile 中的 SPI 频率
-2. 增加当前 board firmware 启动流程中的上电延迟
-3. 检查传感器数据手册，确认读取协议
+## 6. 姿态异常
 
-### 问题 3：Probe OK 但 Init Failed
+- 确认原始加速度和角速度先按正确量程转为物理单位。
+- 确认 `dt` 为正且与采样时间一致。
+- 检查坐标轴方向和四元数约定。
+- 观察输出是否归一化、有限且没有 NaN。
+- 用确定性 host 测试区分算法问题和硬件噪声。
 
-**症状：**
-```
-Slot 2: Trying ICM-42688-compatible with mode0@1mhz -> PROBE OK
-Slot 2: ICM-42688-compatible init failed: ConfigError
-```
+见 [Fusion](fusion.md) 与 [测试策略：Fusion tests](testing.md#fusion-tests)。
 
-**可能原因：**
-1. 传感器配置寄存器写入失败
-2. 传感器内部状态异常
-3. 电源供电不稳定
+## 7. 串口或 viewer 无数据
 
-**排查步骤：**
-1. 增加初始化过程中的延迟
-2. 在驱动的 `init()` 函数开始处添加软复位
-3. 检查电源纹波，使用示波器观察电源稳定性
+1. 关闭其他串口监视器和可能占用端口的进程。
+2. 使用实际端口执行：
 
-### 问题 4：检测成功但数据全是 NA
+   ```bash
+   pixi run just serial-open-check
+   ```
 
-**症状：**
-```
-1:0.069,0.564,0.905,-6.59,1.71,0.61
-2:NA,NA,NA,NA,NA,NA
-```
+3. 确认固件 transport 与 viewer 模式一致：JSON、Binary 或 Auto。
+4. JSON 模式检查是否输出完整的一行一条消息。
+5. Binary 模式检查 COBS `0x00` 分隔和 CRC 错误计数。
+6. 重新连接后核对 session 和 sequence 是否更新。
 
-**可能原因：**
-1. 数据就绪检查过于严格
-2. 传感器采样率配置错误
-3. 读取间隔太短，数据未更新
+命令默认自动检测端口。若存在多个候选端口，可显式执行 `pixi run just serial-open-check COM15 115200`；`COM15` 仅为示例，不是固定硬件配置。
 
-**排查步骤：**
-1. 在对应驱动的 `read_raw()` 函数中注释掉数据就绪检查
-2. 增加当前 device profile 中的采样间隔配置
-3. 检查传感器配置，确认输出数据率（ODR）设置正确
+## 提交问题时记录
 
-## 硬件检查清单
-
-### 电源检查
-- [ ] 5V 或 3.3V 供电正常
-- [ ] 电流供应充足（建议 >500mA）
-- [ ] 去耦电容已焊接
-
-### SPI 总线检查
-- [ ] MOSI (GPIO7) 连接到所有传感器的 SDI/SDA 引脚
-- [ ] MISO (GPIO2) 连接到所有传感器的 SDO 引脚
-- [ ] SCK (GPIO6) 连接到所有传感器的 SCL/SCK 引脚
-- [ ] 所有 SPI 信号线没有短路或断路
-
-### CS 引脚检查
-- [ ] ICM1 (GPIO1) 连接到 ICM-42688-HXY 的 CS 引脚
-- [ ] ICM2 (GPIO3) 连接到 ICM-42688-PC 的 CS 引脚
-- [ ] BM (GPIO4) 连接到 BMI270 的 CS 引脚
-- [ ] QMI (GPIO5) 连接到 QMI8658A 的 CS 引脚
-- [ ] SC (GPIO10) 连接到 SC7U22 的 CS 引脚
-
-### 传感器检查
-- [ ] 所有传感器已正确焊接（无虚焊）
-- [ ] 传感器朝向正确（检查 Pin 1 标记）
-- [ ] 没有焊接桥接（相邻引脚没有短路）
-
-## 调整 SPI 频率
-
-如果怀疑是 SPI 频率问题，可以尝试降低频率：
-
-编辑当前 board/device profile 配置：
-```rust
-// 从 1MHz 降低到 500kHz
-pub const SPI_FREQ_MHZ: u32 = 0.5;
-
-// 或者更保守的 100kHz
-pub const SPI_FREQ_MHZ: u32 = 0.1;
-```
-
-## 增加调试输出
-
-如果需要更详细的调试信息，可以修改 `.cargo/config.toml`:
-```toml
-[env]
-DEFMT_LOG="debug"  # 从 "off" 改为 "debug" 或 "trace"
-```
-
-## 联系支持
-
-如果以上方法都无法解决问题，请记录：
-1. 完整的 probe 输出
-2. 完整的检测日志
-3. 硬件版本和布线图
-4. 已尝试的排查步骤
-
-然后在项目 Issues 中提问或联系硬件提供商。
+- 当前提交或版本。
+- PCB 版本、槽位和芯片表面标记。
+- 实际引脚和供电测量。
+- transport、SPI mode 与频率。
+- 完整 probe/config/sample 错误，而不是截取单个值。
+- 已执行的排查步骤及其结果。

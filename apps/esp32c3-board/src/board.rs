@@ -14,6 +14,7 @@ pub enum TransportMode {
 pub const SPI_FREQ_KHZ: u32 = 1_000;
 pub const STREAM_INTERVAL_MS: u64 = 5;
 pub const POWER_UP_DELAY_MS: u64 = 500;
+pub const JSON_MESSAGE_BUFFER_LEN: usize = 2_048;
 pub const SYSTEM_ID: SystemId = SystemId(1);
 pub const BUS_ID: BusId = BusId(0);
 #[cfg(feature = "json-transport")]

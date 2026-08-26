@@ -4,6 +4,7 @@ members = [
   "apps/esp32c3-board",
   "tools/imu-viewer",
   "tools/imu-viewer-wgpu",
+  "tests/hil",
 ]
 resolver = "3"
 
